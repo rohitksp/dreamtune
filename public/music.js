@@ -16,35 +16,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
         "<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'>" +
-        "<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#6d28d9'/><stop offset='1' stop-color='#db2777'/></linearGradient></defs>" +
+        "<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#6d28d9'/><stop offset='1' stop-color='#5b21b6'/></linearGradient></defs>" +
         "<rect width='400' height='400' fill='url(#g)'/>" +
         "<text x='200' y='250' font-size='160' text-anchor='middle' fill='white' fill-opacity='.85'>&#9835;</text></svg>"
     );
 
     const GRADS = [
-        ['#f43f5e', '#fb923c'], ['#8b5cf6', '#6366f1'], ['#06b6d4', '#3b82f6'], ['#10b981', '#14b8a6'],
-        ['#ec4899', '#8b5cf6'], ['#f59e0b', '#ef4444'], ['#3b82f6', '#8b5cf6'], ['#14b8a6', '#84cc16']
+        ['#7c3aed', '#6366f1'], ['#8b5cf6', '#6366f1'], ['#5b21b6', '#3b1d7a'], ['#4338ca', '#6d28d9'],
+        ['#7c3aed', '#a855f7'], ['#4c1d95', '#6d3bff'], ['#6d28d9', '#312e81'], ['#7e22ce', '#4c1d95']
     ];
     const COVER_ICONS = ['favorite', 'nightlife', 'headphones', 'library_music', 'album', 'piano', 'graphic_eq', 'celebration'];
 
     const LIKED_ID = 'pl-liked';
     const SPEEDS = [1, 1.2, 1.3, 1.5, 1.75, 2];
     const MOODS = {
-        romantic: { label: 'Romantic', e: '💖', g: ['#ff4f8b', '#ff8a5c'], sub: 'Non-stop love songs', w: /love|pyar|pyaar|ishq|ishk|mohabbat|romantic|sanam|humsafar|tum hi|saathiya|kesariya|tere liye/i, q: ['romantic hindi songs', 'arijit singh love songs', '90s romantic hindi songs', 'atif aslam romantic songs', 'new bollywood love songs 2026', 'jubin nautiyal romantic songs'] },
-        sad: { label: 'Sad', e: '😢', g: ['#3b82f6', '#6366f1'], sub: 'For heavy hearts', w: /sad|dard|judai|judaai|bewafa|alvida|tanha|broken|heartbreak/i, q: ['sad hindi songs', 'heartbreak hindi songs', 'arijit singh sad songs', 'emotional bollywood songs'] },
-        party: { label: 'Party', e: '🎉', g: ['#f59e0b', '#ef4444'], sub: 'Turn it up', w: /party|dj |dance|nacho|club|bhangra|badshah|honey singh/i, q: ['bollywood party songs', 'dance hits hindi', 'badshah party songs', 'hindi dj remix songs'] },
-        lofi: { label: 'Lo-fi', e: '🧘', g: ['#14b8a6', '#8b5cf6'], sub: 'Slow and dreamy', w: /lofi|lo-fi|slowed|reverb|chill/i, q: ['lofi hindi songs', 'slowed reverb hindi songs', 'chill lofi bollywood'] },
-        punjabi: { label: 'Punjabi', e: '🎤', g: ['#f97316', '#eab308'], sub: 'Beats and bhangra', w: /punjabi|sidhu|diljit|dhillon|aujla/i, q: ['latest punjabi songs', 'diljit dosanjh songs', 'ap dhillon songs', 'punjabi hits'] },
-        devotional: { label: 'Devotional', e: '🙏', g: ['#f59e0b', '#ec4899'], sub: 'Peace and bhakti', w: /bhajan|bhakti|aarti|shiv|krishna|hanuman|mantra/i, q: ['bhakti songs', 'krishna bhajan', 'shiv bhajan', 'hanuman bhajan'] },
-        retro: { label: '90s Gold', e: '🎶', g: ['#d97706', '#be185d'], sub: 'Evergreen classics', w: /90s|kumar sanu|alka yagnik|udit narayan|old is gold|evergreen|kishore|lata/i, q: ['90s hindi songs', 'kumar sanu hits', 'udit narayan alka yagnik songs', 'old hindi evergreen songs'] },
-        english: { label: 'English', e: '🎸', g: ['#06b6d4', '#3b82f6'], sub: 'Pop and rock', w: /linkin|imagine dragons|ed sheeran|weeknd|taylor swift|coldplay|english/i, q: ['english pop hits', 'linkin park songs', 'imagine dragons songs', 'ed sheeran songs'] }
+        romantic: { label: 'Romantic', e: '💖', g: ['#8b5cf6', '#6d3bff'], sub: 'Non-stop love songs', w: /love|pyar|pyaar|ishq|ishk|mohabbat|romantic|sanam|humsafar|tum hi|saathiya|kesariya|tere liye/i, q: ['romantic hindi songs', 'arijit singh love songs', '90s romantic hindi songs', 'atif aslam romantic songs', 'new bollywood love songs 2026', 'jubin nautiyal romantic songs'] },
+        sad: { label: 'Sad', e: '😢', g: ['#4f46e5', '#312e81'], sub: 'For heavy hearts', w: /sad|dard|judai|judaai|bewafa|alvida|tanha|broken|heartbreak/i, q: ['sad hindi songs', 'heartbreak hindi songs', 'arijit singh sad songs', 'emotional bollywood songs'] },
+        party: { label: 'Party', e: '🎉', g: ['#7c3aed', '#a855f7'], sub: 'Turn it up', w: /party|dj |dance|nacho|club|bhangra|badshah|honey singh/i, q: ['bollywood party songs', 'dance hits hindi', 'badshah party songs', 'hindi dj remix songs'] },
+        lofi: { label: 'Lo-fi', e: '🧘', g: ['#5b21b6', '#4338ca'], sub: 'Slow and dreamy', w: /lofi|lo-fi|slowed|reverb|chill/i, q: ['lofi hindi songs', 'slowed reverb hindi songs', 'chill lofi bollywood'] },
+        punjabi: { label: 'Punjabi', e: '🎤', g: ['#6d28d9', '#9333ea'], sub: 'Beats and bhangra', w: /punjabi|sidhu|diljit|dhillon|aujla/i, q: ['latest punjabi songs', 'diljit dosanjh songs', 'ap dhillon songs', 'punjabi hits'] },
+        devotional: { label: 'Devotional', e: '🙏', g: ['#7e22ce', '#581c87'], sub: 'Peace and bhakti', w: /bhajan|bhakti|aarti|shiv|krishna|hanuman|mantra/i, q: ['bhakti songs', 'krishna bhajan', 'shiv bhajan', 'hanuman bhajan'] },
+        retro: { label: '90s Gold', e: '🎶', g: ['#6b21a8', '#3b0764'], sub: 'Evergreen classics', w: /90s|kumar sanu|alka yagnik|udit narayan|old is gold|evergreen|kishore|lata/i, q: ['90s hindi songs', 'kumar sanu hits', 'udit narayan alka yagnik songs', 'old hindi evergreen songs'] },
+        english: { label: 'English', e: '🎸', g: ['#4338ca', '#6d28d9'], sub: 'Pop and rock', w: /linkin|imagine dragons|ed sheeran|weeknd|taylor swift|coldplay|english/i, q: ['english pop hits', 'linkin park songs', 'imagine dragons songs', 'ed sheeran songs'] }
     };
     Object.assign(MOODS, {
-        rock: { label: 'Rock', e: '🎸', g: ['#ef4444', '#7c3aed'], sub: 'Loud and live', w: /rock|metal|linkin park/i, q: ['hindi rock songs', 'english rock hits'] },
-        pop: { label: 'Pop', e: '🎤', g: ['#ec4899', '#f59e0b'], sub: 'Chart toppers', w: /\bpop\b/i, q: ['pop hits', 'bollywood pop songs'] },
-        hiphop: { label: 'Hip-hop', e: '🎧', g: ['#64748b', '#a855f7'], sub: 'Beats and bars', w: /\brap\b|hip hop|hip-hop|emiway|divine|raftaar/i, q: ['hindi rap songs', 'hip hop hits'] },
-        sufi: { label: 'Sufi', e: '🌙', g: ['#0ea5e9', '#6366f1'], sub: 'Soulful ghazals', w: /sufi|ghazal|qawwali|nusrat|rahat/i, q: ['sufi songs', 'ghazal hits', 'rahat fateh ali khan songs'] },
-        latest: { label: 'New releases', e: '✨', g: ['#22c55e', '#06b6d4'], sub: 'Fresh this week', w: /a^/, q: ['new hindi songs 2026', 'latest songs 2026'] }
+        rock: { label: 'Rock', e: '🎸', g: ['#581c87', '#1e1b4b'], sub: 'Loud and live', w: /rock|metal|linkin park/i, q: ['hindi rock songs', 'english rock hits'] },
+        pop: { label: 'Pop', e: '🎤', g: ['#a855f7', '#7c3aed'], sub: 'Chart toppers', w: /\bpop\b/i, q: ['pop hits', 'bollywood pop songs'] },
+        hiphop: { label: 'Hip-hop', e: '🎧', g: ['#3b0764', '#6d28d9'], sub: 'Beats and bars', w: /\brap\b|hip hop|hip-hop|emiway|divine|raftaar/i, q: ['hindi rap songs', 'hip hop hits'] },
+        sufi: { label: 'Sufi', e: '🌙', g: ['#4c1d95', '#6366f1'], sub: 'Soulful ghazals', w: /sufi|ghazal|qawwali|nusrat|rahat/i, q: ['sufi songs', 'ghazal hits', 'rahat fateh ali khan songs'] },
+        latest: { label: 'New releases', e: '✨', g: ['#7c3aed', '#4f46e5'], sub: 'Fresh this week', w: /a^/, q: ['new hindi songs 2026', 'latest songs 2026'] }
     });
     const KW = { romantic: 'romantic', sad: 'sad', party: 'party', lofi: 'lofi', devotional: 'bhajan', retro: 'old classic', rock: 'rock', pop: 'pop', hiphop: 'rap', sufi: 'sufi', latest: 'new' };
     Object.keys(KW).forEach(k => { MOODS[k].kw = KW[k]; });
@@ -1186,7 +1186,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             console.error(err);
             if (feed === activeFeed) {
-                if (firstPage) showMessage(elements.searchResults, 'error', 'Failed to fetch results', 'Is the backend running? (node server.js)');
+                if (firstPage) showMessage(elements.searchResults, 'error', 'Failed to fetch results', 'Please check your internet and try again.');
                 else showToast('Could not load more songs');
             }
         } finally {
@@ -1367,7 +1367,7 @@ document.addEventListener('DOMContentLoaded', () => {
             setImg(card.querySelector('.song-thumb'), track.thumb);
             card.querySelector('.song-info').addEventListener('click', () => {
                 if (opts.queue) playQueued(track, opts.queue);
-                else playTrack(track, songs, { radio: !!opts.heart, mood: opts.mood || (activeFeed && activeFeed.mood) || null });
+                else playTrack(track, songs, { radio: !!opts.heart, mood: opts.mood || (activeFeed && activeFeed.mood) || null, upnext: afterTrack(songs, track) });
             });
 
             const heart = card.querySelector('.heart-btn');
@@ -1401,7 +1401,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function playTrack(track, playlistContext = [], opts = {}) {
         state.radio = !!opts.radio;
-        if (state.radio && !opts.keep) { state.queue = []; state.history = []; state.similar = null; setTimeout(refillRadio, 0); }
+        if (state.radio && !opts.keep) {
+            // up next = the songs that come after this one in the list you clicked (in order)
+            state.queue = (opts.upnext || []).filter(i => i.id !== track.id && isShortSong(i)).slice(0, 30);
+            state.history = []; state.similar = null;
+            if (state.queue.length < 8) setTimeout(refillRadio, 0);
+        }
         if (state.radio && state.currentTrack && state.currentTrack.id !== track.id && !opts.back) {
             state.history.push(state.currentTrack); if (state.history.length > 60) state.history.shift();
         }
@@ -1497,7 +1502,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const pos = currentPosition();
             if (state.currentTrack && pos > 0.1 && pos < 8) bumpMood(state.currentTrack._mood, -1);   // skipped early = not your taste
             if (!state.queue.length) { showToast('Finding songs you will like...', 1500); await refillRadio(); }
-            const n = state.queue.shift();
+            let n;
+            if (state.shuffle && state.queue.length > 1) n = state.queue.splice(Math.floor(Math.random() * state.queue.length), 1)[0];
+            else n = state.queue.shift();          // normal: next song in the Up next list
             if (n) { playTrack(n, [], { radio: true, keep: true }); if (state.queue.length < 4) refillRadio(); return; }
         }
         if (!state.playlist.length) return;
@@ -1631,6 +1638,7 @@ document.addEventListener('DOMContentLoaded', () => {
             artist: track.artist,
             artwork: track.thumb ? [{ src: track.thumb, sizes: '320x180' }] : []
         });
+        navigator.mediaSession.playbackState = 'playing';
         const set = (name, fn) => { try { navigator.mediaSession.setActionHandler(name, fn); } catch (e) {} };
         set('play', resumeCurrent);
         set('pause', pauseCurrent);
@@ -1639,6 +1647,22 @@ document.addEventListener('DOMContentLoaded', () => {
         set('seekbackward', () => skipBy(-10));
         set('seekforward', () => skipBy(10));
     }
+
+    // keep the lock-screen / notification controls in sync, and try to resume when the phone hides the page
+    let wantPlaying = false;
+    setInterval(() => {
+        if (!('mediaSession' in navigator) || !state.currentTrack) return;
+        navigator.mediaSession.playbackState = state.isPlaying ? 'playing' : 'paused';
+        try {
+            const d = currentDuration(), p = currentPosition();
+            if (d > 0 && isFinite(d)) navigator.mediaSession.setPositionState({ duration: d, position: Math.min(p, d), playbackRate: state.speed || 1 });
+        } catch (e) {}
+    }, 2000);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) { wantPlaying = state.isPlaying; return; }
+        // page is back on screen: if the browser paused the song while hidden, start it again
+        if (wantPlaying && state.currentTrack && !state.isPlaying) setTimeout(() => { if (!state.isPlaying) resumeCurrent(); }, 300);
+    });
 
     /* ---------------------------------------------------------------------
        Taste profile + recommendations (so "next" follows what you like)
@@ -1665,31 +1689,41 @@ document.addEventListener('DOMContentLoaded', () => {
         return (s[1] && s[1][1] > s[0][1] * 0.6 && Math.random() < 0.15) ? s[1][0] : s[0][0];   // 15% variety
     }
 
-    let refilling = false;
-    async function refillRadio() {
-        if (!state.radio || refilling) return;
-        refilling = true;
-        try {
-            const m = pickMood(); let q;
-            if (m) q = moodQuery(m);
-            else { const a = state.currentTrack && state.currentTrack.artist; q = (a && a !== 'YouTube' && !/music|records|t-series/i.test(a)) ? a + ' songs' : HOME_QUERY; }
-            const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(q)}&page=${Math.random() < 0.3 ? 2 : 1}`);
-            const d = await res.json();
-            const seen = new Set([...state.history, ...state.queue, state.currentTrack].filter(Boolean).map(x => x.id));
-            const fresh = (d.items || []).filter(i => !seen.has(i.id)).sort(() => Math.random() - 0.5).slice(0, 10);
-            fresh.forEach(i => { i._mood = m; });
-            state.queue.push(...fresh);
-            state.source = m ? `${MOODS[m].e} ${MOODS[m].label} mix` : 'Your mix';
-        } catch (e) { console.error('refill failed', e); }
-        finally { refilling = false; renderQueue(); }
+    let refillP = null;
+    function customQuery() {
+        const p = state.prefs; if (!p) return null;
+        const c = [...(p.customGenres || []), ...(p.customMoments || [])]; if (!c.length) return null;
+        return c[Math.floor(Math.random() * c.length)].replace(/\s*songs?$/i, '') + ' songs';
+    }
+    function refillRadio() {
+        if (!state.radio) return Promise.resolve();
+        if (refillP) return refillP;
+        refillP = (async () => {
+            try {
+                let m = pickMood(), q; const cq = customQuery();
+                if (cq && Math.random() < 0.25) { q = cq; m = null; }
+                else if (m) q = moodQuery(m);
+                else { const a = state.currentTrack && state.currentTrack.artist; q = (a && a !== 'YouTube' && !/music|records|t-series/i.test(a)) ? a + ' songs' : HOME_QUERY; }
+                const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(q)}&short=1&page=${Math.random() < 0.3 ? 2 : 1}`);
+                const d = await res.json();
+                const seen = new Set([...state.history, ...state.queue, state.currentTrack].filter(Boolean).map(x => x.id));
+                let fresh = (d.items || []).filter(i => !seen.has(i.id) && isShortSong(i)).slice(0, 10);
+                if (state.shuffle) fresh = fresh.sort(() => Math.random() - 0.5);
+                fresh.forEach(i => { i._mood = m; });
+                state.queue.push(...fresh);
+                state.source = m ? `${MOODS[m].e} ${MOODS[m].label} mix` : (state.source || 'Your mix');
+            } catch (e) { console.error('refill failed', e); }
+            finally { refillP = null; renderQueue(); }
+        })();
+        return refillP;
     }
 
     async function loadSimilar() {
         const t = state.currentTrack; if (!t) return;
         const m = t._mood; const q = m ? moodQuery(m) : (t.artist + ' songs');
         try {
-            const d = await (await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(q)}&page=1`)).json();
-            state.similar = (d.items || []).filter(i => i.id !== t.id).slice(0, 15);
+            const d = await (await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(q)}&short=1&page=1`)).json();
+            state.similar = (d.items || []).filter(i => i.id !== t.id && isShortSong(i)).slice(0, 15);
             state.similar.forEach(i => { i._mood = m; });
         } catch (e) { state.similar = []; }
         renderQueue();
@@ -1701,7 +1735,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.queue = state.queue.slice(i + 1);
             playTrack(track, [], { radio: true, keep: true });
         } else if (tab === 'next') playTrack(track, state.playlist);
-        else playTrack(track, [], { radio: true, mood: track._mood });
+        else playTrack(track, [], { radio: true, mood: track._mood, upnext: tab === 'similar' ? afterTrack(state.similar, track) : [] });
     }
 
     function renderQueue() {
@@ -1724,6 +1758,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const recKey = () => 'sp_recent_' + (state.user ? state.user.uid : '');
     const recLoad = () => { try { return JSON.parse(localStorage.getItem(recKey()) || '[]'); } catch (e) { return []; } };
     const recSave = (l) => { try { localStorage.setItem(recKey(), JSON.stringify(l.slice(0, 20))); } catch (e) {} };
+    /* songs only: no jukeboxes / non-stop mixes / hour-long compilations */
+    const LONG_RE = /jukebox|non[\s-]?stop|nonstop|playlist|full album|back to back|\b\d+\s*(hours?|hrs?)\b|\b\d{2,3}\s*songs\b|top\s*\d{2,}/i;
+    const isShortSong = (i) => { const s = parseDur(i && i.duration); return !i || !i.duration || (s >= 45 && s <= 540 && !LONG_RE.test(i.title || '')); };
+    const afterTrack = (arr, t) => { const i = (arr || []).findIndex(x => x.id === t.id); return i < 0 ? [] : arr.slice(i + 1); };
     function parseDur(s) { return s ? String(s).split(':').reduce((a, b) => a * 60 + (Number(b) || 0), 0) : 0; }
     function fmtListen(s) {
         s = Math.max(0, Math.floor(s));
@@ -1825,12 +1863,15 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('pointermove', (e) => {
         if (e.pointerType !== 'mouse') return;
         const c = e.target.closest('.mini-row,.card,.song-card,.station,.browse-tile,.spotlight,.liked-card,.pl-tile');
-        if (hovEl && hovEl !== c) { hovEl.style.removeProperty('--rx'); hovEl.style.removeProperty('--ry'); }
+        if (hovEl && hovEl !== c) { hovEl.style.removeProperty('--rx'); hovEl.style.removeProperty('--ry'); hovEl.classList.remove('tilt'); }
         hovEl = c; if (!c) return;
         const r = c.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
         c.style.setProperty('--mx', (x * 100) + '%'); c.style.setProperty('--my', (y * 100) + '%');
-        if (c.matches('.card,.station,.browse-tile,.spotlight,.liked-card,.pl-tile')) {
-            c.style.setProperty('--rx', ((0.5 - y) * 7).toFixed(1) + 'deg'); c.style.setProperty('--ry', ((x - 0.5) * 9).toFixed(1) + 'deg');
+        if (c.matches('.card,.station,.browse-tile,.liked-card,.pl-tile')) {
+            // tilt only while the cursor is well inside the card, so the card never moves out from under it (no flicker at the edge)
+            const M = 16, inner = e.clientX - r.left > M && r.right - e.clientX > M && e.clientY - r.top > M && r.bottom - e.clientY > M;
+            c.classList.toggle('tilt', inner);
+            if (inner) { c.style.setProperty('--rx', ((0.5 - y) * 7).toFixed(1) + 'deg'); c.style.setProperty('--ry', ((x - 0.5) * 9).toFixed(1) + 'deg'); }
         }
     }, { passive: true });
 
@@ -1841,7 +1882,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadPrefs() {
         try {
             const p = JSON.parse(localStorage.getItem(prefsKey()) || 'null');
-            state.prefs = p && p.langs && p.langs.length ? { langs: p.langs, singers: p.singers || [], genres: (p.genres || []).filter(g => MOODS[g]), moments: p.moments || [] } : null;
+            state.prefs = p && p.langs && p.langs.length ? { langs: p.langs, singers: p.singers || [], genres: (p.genres || []).filter(g => MOODS[g]), moments: p.moments || [], customGenres: p.customGenres || [], customMoments: p.customMoments || [] } : null;
         } catch (e) { state.prefs = null; }
     }
     function savePrefs() {
@@ -1859,7 +1900,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let obStep = 0, obSel = {};
     function showOnboarding() {
         const p = state.prefs || {};
-        obSel = { langs: [...(p.langs || [])], singers: [...(p.singers || [])], genres: [...(p.genres || [])], moments: [...(p.moments || [])] };
+        obSel = { langs: [...(p.langs || [])], singers: [...(p.singers || [])], genres: [...(p.genres || [])], moments: [...(p.moments || [])], cgenres: [...(p.customGenres || [])], cmoments: [...(p.customMoments || [])] };
         obStep = 0; ob.classList.remove('hidden'); renderOb();
     }
     function renderOb() {
@@ -1870,23 +1911,45 @@ document.addEventListener('DOMContentLoaded', () => {
             { k: 'moments', t: 'When do you listen the most?', s: 'We will build mixes for these moments. You can skip this.', o: () => MOMENTS.map(m => [m[0], m[1]]) }
         ];
         const st = steps[obStep], sel = obSel[st.k], last = obStep === steps.length - 1;
+        const ckey = { genres: 'cgenres', moments: 'cmoments' }[st.k];
+        const opts = st.o(), known = new Set(opts.map(o => o[0]));
+        const customList = ckey ? obSel[ckey] : sel.filter(v => !known.has(v));
+        const ph = { langs: 'Other language (e.g. Marathi)', singers: 'Type a singer name', genres: 'Type your own (e.g. Qawwali, EDM, 80s)', moments: 'Type your own (e.g. cooking, rain)' }[st.k];
+        const okMin = () => !st.min || sel.length > 0 || (ckey && obSel[ckey].length > 0);
         ob.innerHTML = `<div class="ob-card"><div class="ob-dots">${steps.map((_, i) => `<i class="${i <= obStep ? 'on' : ''}"></i>`).join('')}</div>
-            <h2>${st.t}</h2><p>${st.s}</p>
-            <div class="ob-grid">${st.o().map(([v, l]) => `<button type="button" class="ob-chip${sel.includes(v) ? ' on' : ''}" data-v="${escapeHtml(v)}">${escapeHtml(l)}</button>`).join('')}</div>
+            <h2>${st.t}</h2><p>${st.s} Or type your own below.</p>
+            <div class="ob-grid">${opts.map(([v, l]) => `<button type="button" class="ob-chip${sel.includes(v) ? ' on' : ''}" data-v="${escapeHtml(v)}">${escapeHtml(l)}</button>`).join('')}${customList.map(v => `<button type="button" class="ob-chip on custom" data-c="${escapeHtml(v)}">${escapeHtml(v)}</button>`).join('')}</div>
+            <div class="ob-custom"><input id="ob-custom-in" type="text" maxlength="40" placeholder="${ph}" autocomplete="off"><button type="button" id="ob-custom-add">Add</button></div>
             <div class="ob-actions">${obStep ? '<button type="button" class="btn-secondary" id="ob-back">Back</button>' : '<span></span>'}
-            <button type="button" class="btn-primary" id="ob-next"${st.min && !sel.length ? ' disabled' : ''}>${last ? 'Build my music' : 'Next'}</button></div></div>`;
+            <button type="button" class="btn-primary" id="ob-next"${okMin() ? '' : ' disabled'}>${last ? 'Build my music' : 'Next'}</button></div></div>`;
         const next = $('ob-next');
-        ob.querySelectorAll('.ob-chip').forEach(b => b.addEventListener('click', () => {
+        ob.querySelectorAll('.ob-chip[data-v]').forEach(b => b.addEventListener('click', () => {
             const v = b.dataset.v, i = sel.indexOf(v);
             if (i >= 0) sel.splice(i, 1); else sel.push(v);
             b.classList.toggle('on', i < 0);
-            if (st.min) next.disabled = !sel.length;
+            next.disabled = !okMin();
         }));
+        ob.querySelectorAll('.ob-chip.custom').forEach(b => b.addEventListener('click', () => {      // tap a custom chip to remove it
+            const list = ckey ? obSel[ckey] : sel, i = list.indexOf(b.dataset.c);
+            if (i >= 0) list.splice(i, 1);
+            renderOb();
+        }));
+        const addCustom = () => {
+            const inp = $('ob-custom-in'), v = inp.value.trim().replace(/\s+/g, ' ').slice(0, 40);
+            if (!v) return;
+            const hit = opts.find(o => o[0].toLowerCase() === v.toLowerCase() || o[1].toLowerCase().replace(/^[^a-z0-9]+/i, '') === v.toLowerCase());
+            const arr = hit ? sel : (ckey ? obSel[ckey] : sel), val = hit ? hit[0] : v;
+            if (!arr.some(x => x.toLowerCase() === val.toLowerCase())) arr.push(val);
+            renderOb();
+            setTimeout(() => { const n = $('ob-custom-in'); if (n) n.focus(); }, 0);
+        };
+        $('ob-custom-add').addEventListener('click', addCustom);
+        $('ob-custom-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addCustom(); } });
         if ($('ob-back')) $('ob-back').addEventListener('click', () => { obStep--; renderOb(); });
         next.addEventListener('click', () => {
             if (!last) { obStep++; renderOb(); return; }
-            const avail = new Set(obSel.langs.flatMap(l => SINGERS[l] || []));
-            state.prefs = { langs: obSel.langs, singers: obSel.singers.filter(s => avail.has(s)), genres: obSel.genres, moments: obSel.moments };
+            const avail = new Set(obSel.langs.flatMap(l => SINGERS[l] || [])), allKnown = new Set(Object.values(SINGERS).flat());
+            state.prefs = { langs: obSel.langs, singers: obSel.singers.filter(s => avail.has(s) || !allKnown.has(s)), genres: obSel.genres, moments: obSel.moments, customGenres: obSel.cgenres, customMoments: obSel.cmoments };
             state.prefs.genres.forEach(g => bumpMood(g, 4));
             savePrefs(); ob.classList.add('hidden');
             elements.shelves.innerHTML = ''; buildShelves(); setView('home-view');
@@ -1933,6 +1996,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (gn[i]) shelfList.push({ t: `${MOODS[gn[i]].label} ${L[i % L.length]}`, q: moodQuery(gn[i]), k: 'rows', all: 1, m: gn[i] });
                 if (sg[i]) shelfList.push({ t: `More from ${sg[i]}`, q: `${sg[i]} songs`, k: 'cards' });
             }
+            (p.customGenres || []).slice(0, 2).forEach(c => shelfList.push({ t: `${c} songs`, q: `${c.replace(/\s*songs?$/i, '')} ${lq} songs`, k: 'cards' }));
+            (p.customMoments || []).slice(0, 2).forEach(c => shelfList.push({ t: `${c} mix`, q: `${c.replace(/\s*songs?$/i, '')} songs`, k: 'cards' }));
             p.moments.slice(0, 2).forEach(k => { const m = MOMENTS.find(x => x[0] === k); if (m) shelfList.push({ t: `${m[1]} mix`, q: m[2], k: 'cards' }); });
         }
         shelfList.push({ t: 'Covers and remixes', q: 'hindi lofi remix songs', k: 'rows', all: 1, m: 'lofi' });
@@ -1959,13 +2024,13 @@ document.addEventListener('DOMContentLoaded', () => {
     async function startStation(m) {
         showToast(`Starting ${MOODS[m].label} radio...`, 1500);
         try {
-            const d = await apiJson(`${API_BASE}/api/search?q=${encodeURIComponent(moodQuery(m))}&page=1`, 6e5);
+            const d = await apiJson(`${API_BASE}/api/search?q=${encodeURIComponent(moodQuery(m))}&short=1&page=1`, 6e5);
             const items = [...(d.items || [])].sort(() => Math.random() - 0.5);
             if (!items.length) throw new Error('empty');
             items.forEach(i => { i._mood = m; });
             playTrack(items[0], [], { radio: true, mood: m });
             state.queue = items.slice(1, 9); state.source = `${MOODS[m].e} ${MOODS[m].label} radio`; renderQueue();
-        } catch (e) { showToast('Could not start radio - is the server running?'); }
+        } catch (e) { showToast('Could not start radio - please try again'); }
     }
 
     async function loadShelf(el) {
@@ -1975,7 +2040,7 @@ document.addEventListener('DOMContentLoaded', () => {
             body.innerHTML = s.ms.map(m => `<button class="station" data-m="${m}" style="--g1:${MOODS[m].g[0]};--g2:${MOODS[m].g[1]}"><span class="badge">STATION</span><strong>${MOODS[m].label} radio</strong><small>${MOODS[m].sub}</small><span class="material-symbols-rounded">play_circle</span></button>`).join('');
             body.querySelectorAll('.station').forEach(b => {
                 b.addEventListener('click', () => startStation(b.dataset.m));
-                apiJson(`${API_BASE}/api/search?q=${encodeURIComponent(MOODS[b.dataset.m].q[0])}&page=1`).then(d => {
+                apiJson(`${API_BASE}/api/search?q=${encodeURIComponent(MOODS[b.dataset.m].q[0])}&short=1&page=1`).then(d => {
                     const it = (d.items || []).find(x => x.views > 1e5) || (d.items || [])[0]; if (!it) return;
                     loadBestImage([`https://i.ytimg.com/vi/${it.id}/maxresdefault.jpg`, `https://i.ytimg.com/vi/${it.id}/hqdefault.jpg`, it.thumb], (u) => {
                         if (u !== PLACEHOLDER) { b.style.setProperty('--img', `url("${u}")`); b.classList.add('has-img'); }
@@ -1985,7 +2050,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         try {
-            const d = await apiJson(`${API_BASE}/api/search?q=${encodeURIComponent(s.q)}&page=1`);
+            const d = await apiJson(`${API_BASE}/api/search?q=${encodeURIComponent(s.q)}&short=1&page=1`);
             const items = (d.items || []).slice(0, s.n || (s.k === 'rows' ? 12 : 10));
             if (!items.length) { el.remove(); return; }
             if (s.k === 'list') {   // banner picture = cover of the newest song
@@ -1994,7 +2059,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (u !== PLACEHOLDER) { sp.style.setProperty('--img', `url("${u}")`); sp.classList.add('has-img'); }
                 });
             }
-            const play = (i) => playTrack(i, items, { radio: true, mood: s.m || detectMood(i.title + ' ' + i.artist) });
+            const play = (i) => playTrack(i, items, { radio: true, mood: s.m || detectMood(i.title + ' ' + i.artist), upnext: afterTrack(items, i) });
             const row = (it, i) => `<button class="mini-row" data-i="${i}"><img data-src="${escapeHtml(it.thumb)}" alt=""><span class="mr-t"><strong class="truncate">${escapeHtml(it.title)}</strong><small class="truncate">${escapeHtml(it.artist)}${viewsHTML(it.views)}${it.duration ? ' • ' + escapeHtml(it.duration) : ''}</small></span></button>`;
             if (s.k === 'list') body.innerHTML = items.map(row).join('');
             else if (s.k === 'rows') {
@@ -2009,7 +2074,7 @@ document.addEventListener('DOMContentLoaded', () => {
             body.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => play(items[+b.dataset.i])));
             const pa = el.querySelector('.play-all');
             if (pa) pa.addEventListener('click', () => { setShuffle(false); playTrack(items[0], items, {}); });
-        } catch (e) { body.innerHTML = `<p class="shelf-err">${navigator.onLine ? 'Could not load. Is the server running?' : 'You are offline. Open Library to play your downloaded songs.'}</p>`; }
+        } catch (e) { body.innerHTML = `<p class="shelf-err">${navigator.onLine ? 'Could not load. Please try again.' : 'You are offline. Open Library to play your downloaded songs.'}</p>`; }
     }
 
     /* ---------------------------------------------------------------------
@@ -2044,7 +2109,7 @@ document.addEventListener('DOMContentLoaded', () => {
        Cover animation: waves moving in a circle around the artwork
        --------------------------------------------------------------------- */
     const cv = $('wave-canvas'), cx = cv.getContext('2d');
-    let waveCols = ['#ff4f8b', '#a855f7'], wt = 0, amp = 0.2;
+    let waveCols = ['#8b5cf6', '#a855f7'], wt = 0, amp = 0.2;
     const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
     function setWaveColors(t) {
         const g = GRADS[hashStr(String(t.id)) % GRADS.length]; waveCols = g;

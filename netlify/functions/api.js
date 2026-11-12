@@ -87,14 +87,19 @@ function fromLockup(l) {
     return { id, title, artist, duration, views: 0, thumb: `https://i.ytimg.com/vi/${id}/mqdefault.jpg` };
 }
 
-async function searchYouTube(q, need) {
+// songs only (for shelves, radio, up-next): no jukeboxes / non-stop mixes / hour-long compilations
+const LONG_RE = /jukebox|non[\s-]?stop|nonstop|playlist|full album|back to back|\b\d+\s*(hours?|hrs?)\b|\b\d{2,3}\s*songs\b|top\s*\d{2,}/i;
+const secs = (d) => String(d || '').split(':').reduce((a, b) => a * 60 + (Number(b) || 0), 0);
+const isSong = (i) => { const s = secs(i.duration); return s >= 45 && s <= 540 && !LONG_RE.test(i.title || ''); };
+
+async function searchYouTube(q, need, short) {
     const items = [], seen = new Set();
     let data = await yt({ query: q, params: 'EgIQAQ%3D%3D' });          // filter: videos only
-    for (let round = 0; round < 6; round++) {
+    for (let round = 0; round < (short ? 8 : 6); round++) {
         const out = { videos: [], lockups: [], token: null };
         collect(data, out);
-        for (const v of out.videos) { const i = fromVideoRenderer(v); if (i && !seen.has(i.id)) { seen.add(i.id); items.push(i); } }
-        for (const l of out.lockups) { const i = fromLockup(l); if (i && !seen.has(i.id)) { seen.add(i.id); items.push(i); } }
+        for (const v of out.videos) { const i = fromVideoRenderer(v); if (i && !seen.has(i.id) && (!short || isSong(i))) { seen.add(i.id); items.push(i); } }
+        for (const l of out.lockups) { const i = fromLockup(l); if (i && !seen.has(i.id) && (!short || isSong(i))) { seen.add(i.id); items.push(i); } }
         if (items.length >= need || !out.token) break;
         data = await yt({ continuation: out.token });
     }
@@ -102,7 +107,7 @@ async function searchYouTube(q, need) {
 }
 
 // Backup: the old library, only used if the direct call fails.
-async function searchFallback(q, need) {
+async function searchFallback(q, need, short) {
     let YouTube;
     try { YouTube = require('youtube-sr').default; } catch (e) { throw new Error('fallback not installed'); }
     const res = await YouTube.search(q, { limit: need, type: 'video' });
@@ -111,7 +116,7 @@ async function searchFallback(q, need) {
         try {
             return { id: v.id, title: v.title, artist: (v.channel && v.channel.name) || 'YouTube', duration: v.durationFormatted || '', views: Number(v.views) || 0, thumb: `https://i.ytimg.com/vi/${v.id}/mqdefault.jpg` };
         } catch (e) { return null; }
-    }).filter(i => i && i.id && !seen.has(i.id) && seen.add(i.id));
+    }).filter(i => i && i.id && (!short || isSong(i)) && !seen.has(i.id) && seen.add(i.id));
 }
 
 exports.handler = async (event) => {
@@ -124,10 +129,11 @@ exports.handler = async (event) => {
             if (!q) return json(200, { items: [], hasMore: false });
             const need = page * PAGE;
             let all;
-            try { all = await searchYouTube(q, need); }
+            const short = p.short === '1';
+            try { all = await searchYouTube(q, need, short); }
             catch (e1) {
                 console.error('direct search failed:', e1.message);
-                all = await searchFallback(q, need);
+                all = await searchFallback(q, need, short);
             }
             return json(200, { items: all.slice((page - 1) * PAGE, need), hasMore: page < MAX && all.length >= need });
         }
