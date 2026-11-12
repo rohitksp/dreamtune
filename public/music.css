@@ -1208,3 +1208,67 @@ html { font-size: 14.5px; }
     .mini-volume { grid-column: 3; grid-row: 1 / 3; justify-self: end; display: flex; align-items: center; gap: 6px; }
 }
 @media (min-width: 1500px) { html { font-size: 15.5px; } }
+
+
+/* ==========================================================================
+   DreamTune v4 - Home search box, spacing, varied card sizes, song lists
+   ========================================================================== */
+
+/* ---- Home search box ---- */
+.home-search { margin: 8px 0 22px; }
+.home-search .search-input-wrapper {
+    position: relative; max-width: 680px; height: 56px; padding: 0 6px 0 8px; border-radius: 999px;
+    background: linear-gradient(var(--surface-solid, var(--sheet-bg)), var(--surface-solid, var(--sheet-bg))) padding-box,
+                linear-gradient(120deg, rgba(255,79,139,.7), rgba(168,85,247,.7), rgba(56,189,248,.6)) border-box;
+    border: 1.5px solid transparent;
+    box-shadow: 0 16px 36px -20px rgba(168,85,247,.85);
+    transition: box-shadow .25s, transform .25s;
+}
+.home-search .search-input-wrapper:focus-within { box-shadow: 0 0 0 4px rgba(168,85,247,.22), 0 18px 40px -18px rgba(255,79,139,.8); transform: translateY(-1px); }
+.home-search .search-icon { width: 40px; height: 40px; margin: 0 8px 0 0; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; background: var(--grad-soft); color: var(--accent); }
+#home-search-input { flex: 1; min-width: 0; height: 100%; background: transparent; border: 0; outline: 0; color: var(--text); font: 500 1rem/1 inherit; font-family: inherit; }
+#home-search-input::placeholder { color: var(--text-2); font-weight: 500; }
+.hs-go { width: 44px; height: 44px; flex-shrink: 0; border: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer; color: #fff; background: var(--grad); box-shadow: 0 8px 18px -8px #ff4f8b; transition: transform .2s; }
+.hs-go:active { transform: scale(.92); }
+.home-search .chip-row { margin-top: 16px; gap: 10px; padding: 2px 2px 6px; -webkit-mask-image: linear-gradient(90deg, #000 90%, transparent); mask-image: linear-gradient(90deg, #000 90%, transparent); }
+.home-search .chip { padding: 8px 16px; border-radius: 999px; font-weight: 600; background: var(--surface); }
+
+/* ---- more room between sections and between song cards ---- */
+.shelves .shelf { margin: 36px 0; }
+.shelves .shelf:first-of-type { margin-top: 26px; }
+.shelf-head { margin-bottom: 16px; }
+.shelf-body { gap: 16px; padding-bottom: 6px; }
+.shelves .spotlight { margin: 8px 0 4px; }
+.arrange-row { margin: 18px 0 0; }
+.view-panel .song-list { gap: 12px; }
+.shelf-body.k-list { row-gap: 10px; }
+.k-list .mini-row { padding: 8px 12px 8px 8px; gap: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; }
+@media (min-width: 900px) {
+    .shelves .shelf { margin: 44px 0; }
+    .view-panel .song-list { gap: 14px 16px; }
+    .shelf-body.k-list { column-gap: 20px; row-gap: 12px; }
+}
+
+/* ---- different card sizes per section (phone / PC / big screen) ---- */
+.shelf-body.k-cards.v-sm   { grid-auto-columns: 112px; gap: 12px; }
+.shelf-body.k-cards.v-md   { grid-auto-columns: 144px; gap: 16px; }
+.shelf-body.k-cards.v-lg   { grid-auto-columns: 200px; gap: 20px; }
+.shelf-body.k-wide.v-wide  { grid-auto-columns: 250px; gap: 18px; }
+.v-sm .card img { aspect-ratio: 1; border-radius: 12px; }
+.v-md .card img { aspect-ratio: 1; border-radius: 16px; }
+.v-lg .card img { aspect-ratio: 4 / 3; border-radius: 22px; box-shadow: 0 18px 34px -16px rgba(0,0,0,.7); }
+.v-lg .card strong { font-size: 1rem; font-weight: 700; }
+.v-sm .card strong { font-size: .8rem; } .v-sm .card small { font-size: .68rem; }
+.card { gap: 7px; }
+@media (min-width: 900px) {
+    .shelf-body.k-cards.v-sm  { grid-auto-columns: 140px; }
+    .shelf-body.k-cards.v-md  { grid-auto-columns: 176px; }
+    .shelf-body.k-cards.v-lg  { grid-auto-columns: 250px; }
+    .shelf-body.k-wide.v-wide { grid-auto-columns: 320px; }
+}
+@media (min-width: 1500px) {
+    .shelf-body.k-cards.v-sm  { grid-auto-columns: 160px; }
+    .shelf-body.k-cards.v-md  { grid-auto-columns: 210px; }
+    .shelf-body.k-cards.v-lg  { grid-auto-columns: 300px; }
+    .shelf-body.k-wide.v-wide { grid-auto-columns: 380px; }
+}

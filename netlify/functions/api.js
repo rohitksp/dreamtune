@@ -1,5 +1,6 @@
-// DreamTune API for Netlify: /api/search and /api/suggest
-// (offline downloads are not available on Netlify)
+// DreamTune API for Netlify: /api/search, /api/suggest and /api/stream
+// /api/stream hands the app a song in chunks (<= 3 MB each, Netlify's response limit is 6 MB)
+// so the app can keep the whole song, play it with the screen off and use it offline.
 //
 // Why this rewrite: the old version used `youtube-sr`, which crashed with
 // "Cannot read properties of undefined (reading 'browseId')" whenever YouTube
@@ -119,6 +120,69 @@ async function searchFallback(q, need, short) {
     }).filter(i => i && i.id && (!short || isSong(i)) && !seen.has(i.id) && seen.add(i.id));
 }
 
+
+/* ---------------------------------------------------------------------
+   /api/stream?id=VIDEOID&start=0&size=3145728
+   Asks YouTube for a direct audio link (the way the phone apps do) and returns one
+   byte range of the m4a audio. The app calls it again for the next range.
+   NOTE: YouTube changes these app-client rules often and may refuse requests that come
+   from data centres. If it does, this answers an error and the app falls back to the
+   normal YouTube player automatically.
+   --------------------------------------------------------------------- */
+const PLAYER_URL = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false';
+const AUDIO_CLIENTS = [
+    { cn: '28', cv: '1.60.19',
+      ua: 'com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+      ctx: { clientName: 'ANDROID_VR', clientVersion: '1.60.19', deviceMake: 'Oculus', deviceModel: 'Quest 3', androidSdkVersion: 32, osName: 'Android', osVersion: '12L', hl: 'en', gl: 'IN' } },
+    { cn: '5', cv: '20.10.4',
+      ua: 'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)',
+      ctx: { clientName: 'IOS', clientVersion: '20.10.4', deviceMake: 'Apple', deviceModel: 'iPhone16,2', osName: 'iPhone', osVersion: '18.3.2.22D82', hl: 'en', gl: 'IN' } }
+];
+const linkCache = new Map();           // videoId -> { url, total, ua, exp }  (kept while this function instance is warm)
+
+async function findAudio(id) {
+    const hit = linkCache.get(id);
+    if (hit && hit.exp > Date.now()) return hit;
+    let lastErr = 'no audio link';
+    for (const c of AUDIO_CLIENTS) {
+        try {
+            const r = await fetch(PLAYER_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'User-Agent': c.ua, 'X-YouTube-Client-Name': c.cn, 'X-YouTube-Client-Version': c.cv, 'Origin': 'https://www.youtube.com' },
+                body: JSON.stringify({ videoId: id, contentCheckOk: true, racyCheckOk: true, context: { client: c.ctx } })
+            });
+            if (!r.ok) { lastErr = 'YouTube HTTP ' + r.status; continue; }
+            const d = await r.json();
+            const status = d.playabilityStatus && d.playabilityStatus.status;
+            if (status && status !== 'OK') { lastErr = 'YouTube says: ' + status; continue; }
+            const fmts = ((d.streamingData && d.streamingData.adaptiveFormats) || [])
+                .filter(f => f.url && /^audio\/mp4/.test(f.mimeType || '') && Number(f.contentLength) > 0);
+            if (!fmts.length) { lastErr = 'no direct audio link'; continue; }
+            const f = fmts.find(x => x.itag === 140) || fmts.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+            const rec = { url: f.url, total: Number(f.contentLength), ua: c.ua, exp: Date.now() + 12 * 60 * 1000 };
+            linkCache.set(id, rec);
+            return rec;
+        } catch (e) { lastErr = e.message; }
+    }
+    throw new Error(lastErr);
+}
+
+async function streamChunk(id, start, size) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const a = await findAudio(id);
+        if (start >= a.total) return { total: a.total, buf: Buffer.alloc(0) };
+        const end = Math.min(start + size, a.total) - 1;
+        const r = await fetch(`${a.url}&range=${start}-${end}`, { headers: { 'User-Agent': a.ua, 'Range': `bytes=${start}-${end}` } });
+        if (r.status === 200 || r.status === 206) {
+            let buf = Buffer.from(await r.arrayBuffer());
+            if (buf.length > end - start + 1) buf = buf.subarray(0, end - start + 1);      // server ignored the range: keep only what we asked for
+            return { total: a.total, buf };
+        }
+        linkCache.delete(id);                                                               // link expired / refused: ask again once
+        if (attempt === 1) throw new Error('audio server HTTP ' + r.status);
+    }
+}
+
 exports.handler = async (event) => {
     const route = (event.rawUrl || event.path || '').split('?')[0].split('/').pop();
     const p = event.queryStringParameters || {};
@@ -144,7 +208,19 @@ exports.handler = async (event) => {
             const d = await r.json();
             return json(200, Array.isArray(d[1]) ? d[1].slice(0, 8) : []);
         }
-        return json(501, { error: 'Offline downloads need your own server (node server.js)' });
+        if (route === 'stream') {
+            const id = String(p.id || '');
+            if (!/^[\w-]{11}$/.test(id)) return json(400, { error: 'bad id' });
+            const start = Math.max(parseInt(p.start, 10) || 0, 0);
+            const size = Math.min(Math.max(parseInt(p.size, 10) || 3145728, 65536), 3500000);
+            const { total, buf } = await streamChunk(id, start, size);
+            return {
+                statusCode: 200, isBase64Encoded: true,
+                headers: { 'Content-Type': 'audio/mp4', 'X-Total-Length': String(total), 'Access-Control-Expose-Headers': 'X-Total-Length', 'Cache-Control': 'private, max-age=3600' },
+                body: buf.toString('base64')
+            };
+        }
+        return json(501, { error: 'Unknown route' });
     } catch (e) {
         console.error('api error:', e);
         return json(500, { error: e.message });

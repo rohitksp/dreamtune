@@ -559,12 +559,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function onYTStateChange(event) {
         if (state.engine !== 'yt') return;
+        if (event.data === YT.PlayerState.BUFFERING) { state.loading = true; updatePlayButtons(); return; }
         if (event.data === YT.PlayerState.PLAYING) {
+            state.loading = false; clearTimeout(loadWatch); prefetchSoon();
             state.isPlaying = true; updatePlayButtons(); startProgressTracker(); applySpeed();
                     if (state.resumeAt) { const r = state.resumeAt; state.resumeAt = 0; seekTo(r); }
         } else if (event.data === YT.PlayerState.PAUSED) {
             if (!state.userPaused && Date.now() - lastSeekAt < 4000) { try { ytPlayer.playVideo(); } catch (e) {} return; }   // paused by a seek/buffer, not by you
-            state.isPlaying = false; updatePlayButtons(); stopProgressTracker();
+            state.loading = false; state.isPlaying = false; updatePlayButtons(); stopProgressTracker();
         } else if (event.data === YT.PlayerState.ENDED) {
             state.isPlaying = false; stopProgressTracker(); onTrackEnded();
         }
@@ -572,6 +574,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function onYTError(event) {
         if (state.engine !== 'yt') return;
+        const ct = state.currentTrack;   // blocked / broken in the YouTube player: try the download-first player once
+        if (ct && !ct._streamTried && STREAM.on && Date.now() > STREAM.offUntil && navigator.onLine && isYTid(ct.id)) {
+            ct._streamTried = true; showToast('Switching player...', 1500);
+            stopEngines(); startStreamed(ct, playToken); return;
+        }
+        state.loading = false;
         state.isPlaying = false;
         updatePlayButtons();
         stopProgressTracker();
@@ -627,11 +635,12 @@ document.addEventListener('DOMContentLoaded', () => {
        --------------------------------------------------------------------- */
     function openDatabase(name) {
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open(name, 1);
+            const request = indexedDB.open(name, 2);
             request.onupgradeneeded = (e) => {
                 const database = e.target.result;
                 if (!database.objectStoreNames.contains('songs')) database.createObjectStore('songs', { keyPath: 'id' });
                 if (!database.objectStoreNames.contains('playlists')) database.createObjectStore('playlists', { keyPath: 'id' });
+                if (!database.objectStoreNames.contains('cache')) database.createObjectStore('cache', { keyPath: 'id' });   // songs fetched ahead of time
             };
             request.onsuccess = (e) => resolve(e.target.result);
             request.onerror = () => reject(request.error);
@@ -820,15 +829,23 @@ document.addEventListener('DOMContentLoaded', () => {
         updateHearts();
         if (!silent) showToast('Downloading for offline...');
         try {
-            const res = await fetch(`${API_BASE}/api/download?id=${encodeURIComponent(record.id)}`);
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            const blob = await res.blob();
+            let blob = null;
+            if (isYTid(record.id) && STREAM.on) {
+                AC.keep.add(record.id);
+                try { blob = await ensureAudio(record.id); } catch (e) { blob = null; } finally { AC.keep.delete(record.id); }
+            }
+            if (!blob) {      // older route: your own server with ytdl (node server.js)
+                const res = await fetch(`${API_BASE}/api/download?id=${encodeURIComponent(record.id)}`);
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                blob = await res.blob();
+            }
             if (!blob.size) throw new Error('Empty file');
 
             const current = await dbGet('songs', record.id);   // might have been removed meanwhile
             if (current) {
                 current.audioBlob = blob;
                 await dbPut('songs', current);
+                acDelete(record.id);
                 if (!silent) showToast('Saved for offline listening');
             }
         } catch (err) {
@@ -1402,13 +1419,173 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /* ---------------------------------------------------------------------
+       Download-first player: the whole song is fetched (in chunks), kept in
+       IndexedDB and played from the <audio> tag. That keeps playing with the
+       screen off, never "buffers" while you skip, and the next songs are
+       fetched ahead of time. If it cannot work, the YouTube player is used.
+       --------------------------------------------------------------------- */
+    let playToken = 0, loadWatch = null, prefetchTimer = null;
+    const STREAM = { on: true, fails: 0, offUntil: 0, warned: false };
+    const AC = { want: new Set(), keep: new Set(), loading: new Map(), mem: new Map(), noStream: new Set() };
+    const AC_MAX = 30;                                      // songs kept in the pre-download cache
+    const isYTid = (id) => /^[\w-]{11}$/.test(String(id || ''));
+    const streamUsable = (t) => STREAM.on && Date.now() > STREAM.offUntil && navigator.onLine && isYTid(t.id) && !t.isLocal && !AC.noStream.has(t.id);
+    const acMetaKey = () => 'sp_ac_' + (state.user ? state.user.uid : '');
+    const acMeta = () => { try { return JSON.parse(localStorage.getItem(acMetaKey()) || '[]'); } catch (e) { return []; } };
+
+    async function acGet(id) {
+        if (AC.mem.has(id)) return AC.mem.get(id);
+        const s = state.songs.get(id);
+        if (s && s.audioBlob) return s.audioBlob;
+        if (!state.db) return null;
+        try { const r = await dbGet('cache', id); if (r && r.blob && r.blob.size) { AC.mem.set(id, r.blob); return r.blob; } } catch (e) {}
+        return null;
+    }
+    async function acPut(id, blob) {
+        AC.mem.set(id, blob);
+        while (AC.mem.size > 4) AC.mem.delete(AC.mem.keys().next().value);
+        if (!state.db) return;
+        try { await dbPut('cache', { id, blob, at: Date.now() }); } catch (e) { return; }    // e.g. storage full: it still plays from memory
+        const meta = acMeta().filter(m => m.id !== id); meta.push({ id, at: Date.now() });
+        while (meta.length > AC_MAX) { const old = meta.shift(); try { await dbDel('cache', old.id); } catch (e) {} }
+        try { localStorage.setItem(acMetaKey(), JSON.stringify(meta)); } catch (e) {}
+    }
+    async function acDelete(id) { AC.mem.delete(id); try { await dbDel('cache', id); } catch (e) {} }
+
+    async function fetchAudio(id) {
+        const SIZE = 3 * 1024 * 1024, parts = [];
+        let start = 0, total = 0, mime = 'audio/mp4';
+        for (let n = 0; n < 24; n++) {
+            if (!AC.want.has(id) && !AC.keep.has(id)) throw new Error('cancelled');      // you skipped away
+            const r = await fetch(`${API_BASE}/api/stream?id=${encodeURIComponent(id)}&start=${start}&size=${SIZE}`);
+            if (!r.ok) { const e = new Error('stream HTTP ' + r.status); e.status = r.status; throw e; }
+            total = Number(r.headers.get('X-Total-Length')) || total;
+            mime = (r.headers.get('Content-Type') || mime).split(';')[0];
+            const buf = await r.arrayBuffer();
+            if (!buf.byteLength) throw new Error('empty chunk');
+            if (total > 40 * 1024 * 1024) { AC.noStream.add(id); const e = new Error('too long'); e.tooLong = true; throw e; }
+            parts.push(buf); start += buf.byteLength;
+            if (!total || start >= total) break;
+        }
+        if (!total || start < total) throw new Error('incomplete download');
+        return new Blob(parts, { type: mime });
+    }
+
+    function noteStream(err) {      // after repeated failures stop trying for a while and use the YouTube player
+        if (!err) { STREAM.fails = 0; return; }
+        if (err.message === 'cancelled' || err.tooLong) return;
+        STREAM.fails++;
+        const dead = err.status === 404 || err.status === 501;
+        if (dead || STREAM.fails >= 3) {
+            STREAM.offUntil = Date.now() + (dead ? 60 : 10) * 60e3; STREAM.fails = 0;
+            if (!STREAM.warned) { STREAM.warned = true; showToast('Fast audio is not available right now - using the standard player', 4200); }
+        }
+    }
+
+    function ensureAudio(id) {
+        if (AC.loading.has(id)) return AC.loading.get(id);
+        const p = (async () => {
+            const hit = await acGet(id);
+            if (hit) return hit;
+            try { const blob = await fetchAudio(id); noteStream(null); await acPut(id, blob); return blob; }
+            catch (e) { noteStream(e); throw e; }
+        })().finally(() => AC.loading.delete(id));
+        AC.loading.set(id, p);
+        return p;
+    }
+
+    function playBlob(track, blob) {
+        state.engine = 'audio'; state.loading = true; updatePlayButtons();
+        if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
+        state.objectUrl = URL.createObjectURL(blob);
+        audio.src = state.objectUrl;
+        audio.play().catch(err => { console.error(err); state.loading = false; updatePlayButtons(); showToast('Tap play to start'); });
+    }
+
+    function watchLoad(track, tries) {      // YouTube player did not start: nudge it, retry, then skip
+        clearTimeout(loadWatch);
+        loadWatch = setTimeout(() => {
+            if (state.currentTrack !== track || state.engine !== 'yt' || !ytReady || state.userPaused) return;
+            let st = -1; try { st = ytPlayer.getPlayerState(); } catch (e) {}
+            if (st === 1) return;
+            if (tries === 0) { try { ytPlayer.playVideo(); } catch (e) {} watchLoad(track, 1); }
+            else if (tries === 1) { showToast('Slow connection - trying again...', 2000); try { ytPlayer.loadVideoById({ videoId: track.id, startSeconds: 0, suggestedQuality: 'small' }); } catch (e) {} watchLoad(track, 2); }
+            else { showToast('Could not load this song - skipping'); state.loading = false; playNextTrack(); }
+        }, 5000);
+    }
+
+    function startYT(track, token, now) {
+        state.engine = 'yt'; state.loading = true; updatePlayButtons();
+        const go = () => {
+            if (token !== playToken) return;
+            if (ytReady) {
+                ytPlayer.loadVideoById({ videoId: track.id, startSeconds: 0, suggestedQuality: 'small' });   // small video = less to download = starts faster
+                ytPlayer.setVolume(state.muted ? 0 : state.volume);
+                ytPlayer.unMute();
+                watchLoad(track, 0);
+            } else { pendingVideoId = track.id; loadYouTubeAPI(); showToast('Loading player...'); }
+        };
+        if (now) go(); else setTimeout(go, 200);          // quick skips only load the song you stop on
+    }
+
+    async function startStreamed(track, token) {
+        state.loading = true; state.engine = null; updatePlayButtons();
+        AC.want = new Set([track.id]);
+        let fellBack = false;
+        const timer = setTimeout(() => { if (token === playToken && !fellBack) { fellBack = true; startYT(track, token, true); } }, 9000);   // slow: start the YouTube player meanwhile
+        try {
+            const blob = await ensureAudio(track.id);
+            clearTimeout(timer);
+            if (token !== playToken || fellBack) return;
+            playBlob(track, blob);
+        } catch (err) {
+            clearTimeout(timer);
+            if (err && err.message === 'cancelled') return;
+            if (token === playToken && !fellBack) startYT(track, token, true);
+        }
+    }
+
+    function prefetchSoon() { clearTimeout(prefetchTimer); prefetchTimer = setTimeout(prefetchRun, 1500); }
+    async function prefetchRun() {          // download the next songs while this one plays
+        const cur = state.currentTrack;
+        if (!cur || !navigator.onLine || !STREAM.on || Date.now() < STREAM.offUntil) return;
+        try { if (navigator.connection && navigator.connection.saveData) return; } catch (e) {}
+        const list = state.radio ? state.queue : (state.shuffle ? [] : state.playlist.slice(state.currentIndex + 1));
+        const up = list.slice(0, 2).filter(t => isYTid(t.id) && !t.isLocal && !AC.noStream.has(t.id));
+        AC.want = new Set([cur.id, ...up.map(t => t.id)]);
+        for (const t of up) {
+            if (state.currentTrack !== cur) return;
+            try { await ensureAudio(t.id); } catch (e) { if (!e || e.message !== 'cancelled') return; }
+        }
+    }
+
+    audio.addEventListener('waiting', () => { if (state.engine === 'audio') { state.loading = true; updatePlayButtons(); } });
+    audio.addEventListener('playing', () => { if (state.engine === 'audio') { state.loading = false; updatePlayButtons(); prefetchSoon(); } });
+    audio.addEventListener('error', () => {   // a downloaded copy that cannot play: use the YouTube player instead
+        const t = state.currentTrack;
+        if (state.engine !== 'audio' || !t || t.isLocal || !isYTid(t.id) || t._ytFallback) return;
+        t._ytFallback = true; stopEngines(); startYT(t, playToken, true);
+    });
+    // phones only allow sound that was started by a tap; this "unlocks" the audio tag on the first tap so downloaded songs can start by themselves
+    document.addEventListener('pointerdown', function unlock() {
+        document.removeEventListener('pointerdown', unlock, true);
+        try {
+            audio.muted = true; audio.src = KA.src;
+            const p = audio.play();
+            const done = () => { audio.muted = false; if (audio.src === KA.src) { audio.pause(); audio.removeAttribute('src'); } };
+            if (p && p.then) p.then(done, done); else done();
+        } catch (e) { audio.muted = false; }
+    }, true);
+
+    /* ---------------------------------------------------------------------
        Playback controller  (shuffle, repeat, +/-10s)
        --------------------------------------------------------------------- */
-    function stopEngines() {
+    function stopEngines(keepYT) {
         state.engine = null;
         stopProgressTracker();
+        clearTimeout(loadWatch);
         audio.pause();
-        if (ytReady) { try { ytPlayer.stopVideo(); } catch (e) {} }
+        if (ytReady && !keepYT) { try { ytPlayer.stopVideo(); } catch (e) {} }     // YT -> YT: no stop, that left the player stuck between songs
         pendingVideoId = null;
     }
 
@@ -1447,9 +1624,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        stopEngines();
+        const token = ++playToken;
+        const viaStream = !track.isLocal && !blob && streamUsable(track);
+        stopEngines(!track.isLocal && !blob && !viaStream);
         resetProgress();
-        state.isPlaying = false;
+        state.isPlaying = false; state.loading = false;
         updateTrackUI();
         updatePlayButtons();
 
@@ -1460,17 +1639,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (blob) state.objectUrl = URL.createObjectURL(blob);
             audio.src = blob ? state.objectUrl : track.streamUrl;
             audio.play().catch(err => { console.error(err); showToast('Tap play to start'); });
+        } else if (viaStream) {
+            state.loading = true; updatePlayButtons();
+            acGet(track.id).then(hit => {
+                if (token !== playToken) return;
+                if (hit) { playBlob(track, hit); return; }                        // already downloaded ahead: starts at once
+                setTimeout(() => { if (token === playToken) startStreamed(track, token); }, 150);   // quick skips do not start a download for every song
+            });
         } else {
-            state.engine = 'yt';
-            if (ytReady) {
-                ytPlayer.loadVideoById(track.id);
-                ytPlayer.setVolume(state.muted ? 0 : state.volume);
-                ytPlayer.unMute();
-            } else {
-                pendingVideoId = track.id;
-                loadYouTubeAPI();
-                showToast('Loading player...');
-            }
+            startYT(track, token, false);
         }
         setupMediaSession(track);
     }
@@ -1656,9 +1833,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updatePlayButtons() {
-        const icon = state.isPlaying ? 'pause' : 'play_arrow';
-        elements.mainPlayBtn.querySelector('span').textContent = icon;
-        elements.miniPlayBtn.querySelector('span').textContent = icon;
+        const icon = state.isPlaying ? 'pause' : (state.loading ? 'progress_activity' : 'play_arrow');
+        [elements.mainPlayBtn, elements.miniPlayBtn].forEach(b => { const sp = b.querySelector('span'); sp.textContent = icon; sp.classList.toggle('spin', icon === 'progress_activity'); });
         elements.fullPlayerOverlay.classList.toggle('playing', state.isPlaying);
         elements.app.classList.toggle('is-playing', state.isPlaying);
         keepAlive(state.isPlaying && state.engine === 'yt');
@@ -1735,6 +1911,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     $('home-chips').addEventListener('click', (e) => { const c = e.target.closest('.chip'); if (c) goSearch(c.dataset.q); });
     $('home-search-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') goSearch(e.target.value); });
+    $('home-search-go').addEventListener('click', () => goSearch($('home-search-input').value));
 
     /* ---------------------------------------------------------------------
        Taste profile + recommendations (so "next" follows what you like)
@@ -1785,7 +1962,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.queue.push(...fresh);
                 state.source = m ? ` ${MOODS[m].label} mix` : (state.source || 'Your mix');
             } catch (e) { console.error('refill failed', e); }
-            finally { refillP = null; renderQueue(); }
+            finally { refillP = null; renderQueue(); prefetchSoon(); }
         })();
         return refillP;
     }
@@ -2062,10 +2239,23 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.isIntersecting) { shelfIO.unobserve(e.target); loadShelf(e.target); }
     }), { root: elements.contentArea, rootMargin: '300px' });
 
+    // Home rhythm: after every 3 card sections comes a plain song list, and the card sections use different sizes
+    function applyRhythm(list) {
+        const SIZES = ['md', 'sm', 'lg'], COUNT = { sm: 8, md: 7, lg: 5 };
+        let run = 0, si = 0;
+        list.forEach(s => {
+            if (s.latest) { run = 0; return; }
+            if (s.k === 'stations') { s.n = 5; run++; return; }
+            if (s.k === 'wide') { s.v = 'wide'; s.n = 5; run++; return; }
+            if (run >= 3) { s.k = 'list'; s.n = 5; run = 0; return; }   // a song list breaks up the cards
+            s.k = 'cards'; s.v = SIZES[si++ % SIZES.length]; s.n = COUNT[s.v]; run++;
+        });
+    }
+
     function buildShelves() {
         renderHomeChips();
         const p = state.prefs, top = topMood(), L = (p && p.langs.length) ? p.langs : ['Hindi'], lq = L[0].toLowerCase();
-        shelfList = [{ t: 'Latest songs', q: `latest ${lq} songs 2026`, k: 'list', all: 1, n: 6 }];
+        shelfList = [{ t: 'Latest songs', q: `latest ${lq} songs 2026`, k: 'list', all: 1, n: 5, latest: 1 }];
         if (top) shelfList.push({ t: `Because you like ${MOODS[top].label}`, q: moodQuery(top), k: 'rows', all: 1, m: top });
         shelfList.push({ t: 'Mood stations', k: 'stations', ms: ((p && p.genres.length) ? p.genres : ['romantic', 'retro', 'party', 'lofi', 'sad']).slice(0, 6) });
         if (p) {
@@ -2081,7 +2271,7 @@ document.addEventListener('DOMContentLoaded', () => {
         shelfList.push({ t: 'Covers and remixes', q: 'hindi lofi remix songs', k: 'rows', all: 1, m: 'lofi' });
         if (!p) shelfList.push(...SHELVES.filter(s => s.k === 'cards'));
         shelfList.push({ t: 'Music videos for you', q: `new ${lq} music video 2026`, k: 'wide' });
-        shelfList.forEach(s => { if (s.k === 'rows') s.k = 'cards'; s.t = noEmoji(s.t); });
+        shelfList.forEach(s => { s.t = noEmoji(s.t); });
         const ord = JSON.parse(localStorage.getItem(orderKey()) || '[]'), hid = JSON.parse(localStorage.getItem(hiddenKey()) || '[]');
         shelfList = shelfList.map((s, i) => [s, i]).sort((a, b) => {
             const x = ord.indexOf(shelfKey(a[0])), y = ord.indexOf(shelfKey(b[0]));
@@ -2089,12 +2279,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }).map(a => a[0]);
         allShelves = shelfList.slice();
         shelfList = shelfList.filter(s => !hid.includes(shelfKey(s)));
+        applyRhythm(shelfList);
         elements.shelves.innerHTML = `
             <div class="spotlight"><div><h2>Your mix</h2><p>Starts with what you love and keeps adapting as you listen.</p>
             <button class="btn-white" id="play-mix"><span class="material-symbols-rounded">play_arrow</span><span>Play mix</span></button></div>
             <div class="spot-disc"></div><div class="spot-art">${'<i></i>'.repeat(26)}</div></div>
             <div class="arrange-row"><button class="pill-btn" id="arrange-btn"><span class="material-symbols-rounded">swap_vert</span>Arrange sections</button></div>` +
-            shelfList.map((s, i) => `<section class="shelf" data-i="${i}"><div class="shelf-head"><h3>${s.t}</h3>${s.all ? '<button class="pill-btn play-all">Play all</button>' : ''}</div><div class="shelf-body k-${s.k}">${SK[s.k] || ''}</div></section>`).join('');
+            shelfList.map((s, i) => `<section class="shelf" data-i="${i}"><div class="shelf-head"><h3>${s.t}</h3>${s.all ? '<button class="pill-btn play-all">Play all</button>' : ''}</div><div class="shelf-body k-${s.k}${s.v ? ' v-' + s.v : ''}">${SK[s.k] || ''}</div></section>`).join('');
         $('play-mix').addEventListener('click', () => startStation(topMood() || (state.prefs && state.prefs.genres[0]) || 'romantic'));
         $('arrange-btn').addEventListener('click', openArrange);
         elements.shelves.querySelectorAll('.shelf').forEach(el => shelfIO.observe(el));
@@ -2132,7 +2323,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const d = await apiJson(`${API_BASE}/api/search?q=${encodeURIComponent(s.q)}&short=1&page=1`);
             const items = (d.items || []).slice(0, s.n || (s.k === 'rows' ? 12 : 10));
             if (!items.length) { el.remove(); return; }
-            if (s.k === 'list') {   // banner picture = cover of the newest song
+            if (s.latest) {   // banner picture = cover of the newest song
                 const sp = elements.shelves.querySelector('.spotlight'), it0 = items[0];
                 if (sp && it0) loadBestImage([`https://i.ytimg.com/vi/${it0.id}/maxresdefault.jpg`, `https://i.ytimg.com/vi/${it0.id}/hqdefault.jpg`, it0.thumb], (u) => {
                     if (u !== PLACEHOLDER) { sp.style.setProperty('--img', `url("${u}")`); sp.classList.add('has-img'); }
