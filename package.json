@@ -1,0 +1,6 @@
+{
+  "name": "dreamtune",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": { "youtube-sr": "^4.3.11" }
+}
