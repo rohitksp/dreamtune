@@ -22,17 +22,17 @@ document.addEventListener('DOMContentLoaded', () => {
     );
 
     const GRADS = [
-        ['#7c3aed', '#6366f1'], ['#8b5cf6', '#6366f1'], ['#5b21b6', '#3b1d7a'], ['#4338ca', '#6d28d9'],
-        ['#7c3aed', '#a855f7'], ['#4c1d95', '#6d3bff'], ['#6d28d9', '#312e81'], ['#7e22ce', '#4c1d95']
+        ['#6a49b8', '#6a6fc9'], ['#7e62c4', '#6a6fc9'], ['#5b21b6', '#3b1d7a'], ['#4338ca', '#6d28d9'],
+        ['#6a49b8', '#8a63d2'], ['#4c1d95', '#5f46b8'], ['#6d28d9', '#312e81'], ['#7e22ce', '#4c1d95']
     ];
     const COVER_ICONS = ['favorite', 'nightlife', 'headphones', 'library_music', 'album', 'piano', 'graphic_eq', 'celebration'];
 
     const LIKED_ID = 'pl-liked';
     const SPEEDS = [1, 1.2, 1.3, 1.5, 1.75, 2];
     const MOODS = {
-        romantic: { label: 'Romantic', e: '💖', g: ['#8b5cf6', '#6d3bff'], sub: 'Non-stop love songs', w: /love|pyar|pyaar|ishq|ishk|mohabbat|romantic|sanam|humsafar|tum hi|saathiya|kesariya|tere liye/i, q: ['romantic hindi songs', 'arijit singh love songs', '90s romantic hindi songs', 'atif aslam romantic songs', 'new bollywood love songs 2026', 'jubin nautiyal romantic songs'] },
+        romantic: { label: 'Romantic', e: '💖', g: ['#7e62c4', '#5f46b8'], sub: 'Non-stop love songs', w: /love|pyar|pyaar|ishq|ishk|mohabbat|romantic|sanam|humsafar|tum hi|saathiya|kesariya|tere liye/i, q: ['romantic hindi songs', 'arijit singh love songs', '90s romantic hindi songs', 'atif aslam romantic songs', 'new bollywood love songs 2026', 'jubin nautiyal romantic songs'] },
         sad: { label: 'Sad', e: '😢', g: ['#4f46e5', '#312e81'], sub: 'For heavy hearts', w: /sad|dard|judai|judaai|bewafa|alvida|tanha|broken|heartbreak/i, q: ['sad hindi songs', 'heartbreak hindi songs', 'arijit singh sad songs', 'emotional bollywood songs'] },
-        party: { label: 'Party', e: '🎉', g: ['#7c3aed', '#a855f7'], sub: 'Turn it up', w: /party|dj |dance|nacho|club|bhangra|badshah|honey singh/i, q: ['bollywood party songs', 'dance hits hindi', 'badshah party songs', 'hindi dj remix songs'] },
+        party: { label: 'Party', e: '🎉', g: ['#6a49b8', '#8a63d2'], sub: 'Turn it up', w: /party|dj |dance|nacho|club|bhangra|badshah|honey singh/i, q: ['bollywood party songs', 'dance hits hindi', 'badshah party songs', 'hindi dj remix songs'] },
         lofi: { label: 'Lo-fi', e: '🧘', g: ['#5b21b6', '#4338ca'], sub: 'Slow and dreamy', w: /lofi|lo-fi|slowed|reverb|chill/i, q: ['lofi hindi songs', 'slowed reverb hindi songs', 'chill lofi bollywood'] },
         punjabi: { label: 'Punjabi', e: '🎤', g: ['#6d28d9', '#9333ea'], sub: 'Beats and bhangra', w: /punjabi|sidhu|diljit|dhillon|aujla/i, q: ['latest punjabi songs', 'diljit dosanjh songs', 'ap dhillon songs', 'punjabi hits'] },
         devotional: { label: 'Devotional', e: '🙏', g: ['#7e22ce', '#581c87'], sub: 'Peace and bhakti', w: /bhajan|bhakti|aarti|shiv|krishna|hanuman|mantra/i, q: ['bhakti songs', 'krishna bhajan', 'shiv bhajan', 'hanuman bhajan'] },
@@ -41,10 +41,10 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     Object.assign(MOODS, {
         rock: { label: 'Rock', e: '🎸', g: ['#581c87', '#1e1b4b'], sub: 'Loud and live', w: /rock|metal|linkin park/i, q: ['hindi rock songs', 'english rock hits'] },
-        pop: { label: 'Pop', e: '🎤', g: ['#a855f7', '#7c3aed'], sub: 'Chart toppers', w: /\bpop\b/i, q: ['pop hits', 'bollywood pop songs'] },
+        pop: { label: 'Pop', e: '🎤', g: ['#8a63d2', '#6a49b8'], sub: 'Chart toppers', w: /\bpop\b/i, q: ['pop hits', 'bollywood pop songs'] },
         hiphop: { label: 'Hip-hop', e: '🎧', g: ['#3b0764', '#6d28d9'], sub: 'Beats and bars', w: /\brap\b|hip hop|hip-hop|emiway|divine|raftaar/i, q: ['hindi rap songs', 'hip hop hits'] },
-        sufi: { label: 'Sufi', e: '🌙', g: ['#4c1d95', '#6366f1'], sub: 'Soulful ghazals', w: /sufi|ghazal|qawwali|nusrat|rahat/i, q: ['sufi songs', 'ghazal hits', 'rahat fateh ali khan songs'] },
-        latest: { label: 'New releases', e: '✨', g: ['#7c3aed', '#4f46e5'], sub: 'Fresh this week', w: /a^/, q: ['new hindi songs 2026', 'latest songs 2026'] }
+        sufi: { label: 'Sufi', e: '🌙', g: ['#4c1d95', '#6a6fc9'], sub: 'Soulful ghazals', w: /sufi|ghazal|qawwali|nusrat|rahat/i, q: ['sufi songs', 'ghazal hits', 'rahat fateh ali khan songs'] },
+        latest: { label: 'New releases', e: '✨', g: ['#6a49b8', '#4f46e5'], sub: 'Fresh this week', w: /a^/, q: ['new hindi songs 2026', 'latest songs 2026'] }
     });
     const KW = { romantic: 'romantic', sad: 'sad', party: 'party', lofi: 'lofi', devotional: 'bhajan', retro: 'old classic', rock: 'rock', pop: 'pop', hiphop: 'rap', sufi: 'sufi', latest: 'new' };
     Object.keys(KW).forEach(k => { MOODS[k].kw = KW[k]; });
@@ -74,15 +74,15 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
 
     const CHIPS = [
-        { label: '🔥 Trending', q: 'trending hindi songs 2026' },
-        { label: '💖 Romantic', q: 'romantic hindi songs' },
-        { label: '🎶 90s Hits', q: '90s hindi songs' },
-        { label: '🎤 Punjabi', q: 'latest punjabi songs' },
-        { label: '😢 Sad', q: 'sad hindi songs' },
-        { label: '🎉 Party', q: 'bollywood party songs' },
-        { label: '🧘 Lo-fi', q: 'lofi hindi songs' },
-        { label: '🙏 Devotional', q: 'bhakti songs' },
-        { label: '🎸 English', q: 'english pop hits' }
+        { label: 'Trending', q: 'trending hindi songs 2026' },
+        { label: 'Romantic', q: 'romantic hindi songs' },
+        { label: '90s Hits', q: '90s hindi songs' },
+        { label: 'Punjabi', q: 'latest punjabi songs' },
+        { label: 'Sad', q: 'sad hindi songs' },
+        { label: 'Party', q: 'bollywood party songs' },
+        { label: 'Lo-fi', q: 'lofi hindi songs' },
+        { label: 'Devotional', q: 'bhakti songs' },
+        { label: 'English', q: 'english pop hits' }
     ];
 
     const state = {
@@ -169,6 +169,18 @@ document.addEventListener('DOMContentLoaded', () => {
     function gradientFor(key) {
         const g = GRADS[hashStr(String(key)) % GRADS.length];
         return `linear-gradient(135deg, ${g[0]}, ${g[1]})`;
+    }
+
+    function noEmoji(s) { return String(s == null ? '' : s).replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '').replace(/\s+/g, ' ').trim(); }
+    const GEN = new Set('new latest official full hindi punjabi english bhojpuri haryanvi tamil telugu bengali bollywood romantic trending top best hit hits song songs video videos audio lyrical lyric lyrics music jukebox hd 4k 8k mv out now version'.split(' '));
+    function cleanTitle(t) {
+        const s0 = noEmoji(t); if (!s0) return '';
+        const parts = s0.split(/\s*[|｜]\s*/).filter(Boolean);
+        const gen = (p) => { const w = p.toLowerCase().split(/[^a-z0-9\u0900-\u097f]+/).filter(Boolean); return w.length > 0 && w.every(x => GEN.has(x) || /^\d+$/.test(x)); };
+        let s = parts.find(p => !gen(p)) || parts[0] || s0;
+        s = s.replace(/\s*[\(\[][^\)\]]*\b(official|video|lyric|lyrics|audio|full|hd|4k|8k|song|visualizer|music)\b[^\)\]]*[\)\]]/gi, '');
+        s = s.replace(/\s*[-–—:]\s*(official|full|lyrical|lyric)\b.*$/i, '');
+        return s.replace(/\s{2,}/g, ' ').replace(/[\s\-–—:,]+$/, '').trim() || s0;
     }
 
     function fmtViews(n) {
@@ -551,6 +563,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.isPlaying = true; updatePlayButtons(); startProgressTracker(); applySpeed();
                     if (state.resumeAt) { const r = state.resumeAt; state.resumeAt = 0; seekTo(r); }
         } else if (event.data === YT.PlayerState.PAUSED) {
+            if (!state.userPaused && Date.now() - lastSeekAt < 4000) { try { ytPlayer.playVideo(); } catch (e) {} return; }   // paused by a seek/buffer, not by you
             state.isPlaying = false; updatePlayButtons(); stopProgressTracker();
         } else if (event.data === YT.PlayerState.ENDED) {
             state.isPlaying = false; stopProgressTracker(); onTrackEnded();
@@ -572,7 +585,7 @@ document.addEventListener('DOMContentLoaded', () => {
         progressTimer = setInterval(() => {
             if (state.engine !== 'yt' || !ytReady) return;
             const total = ytPlayer.getDuration();
-            if (total > 0) setProgress(ytPlayer.getCurrentTime(), total);
+            if (total > 0 && seekTarget === null) setProgress(ytPlayer.getCurrentTime(), total);
         }, 500);
     }
 
@@ -1327,7 +1340,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="eq"><i></i><i></i><i></i></span>
                     </div>
                     <div class="song-details">
-                        <span class="song-title truncate">${escapeHtml(s.title)}</span>
+                        <span class="song-title truncate">${escapeHtml(cleanTitle(s.title))}</span>
                         <span class="song-artist truncate">${escapeHtml(s.artist)}${viewsHTML(s.views)}${s.duration ? ' • ' + escapeHtml(s.duration) : ''}${offline ? ' • Offline ✓' : ''}</span>
                     </div>
                 </div>
@@ -1411,6 +1424,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.history.push(state.currentTrack); if (state.history.length > 60) state.history.shift();
         }
         state.resumeAt = opts.resumeAt || 0;
+        state.userPaused = false;
         recTouch(track, opts.resumeAt || 0);
         const mood = opts.mood || track._mood || detectMood(track.title + ' ' + track.artist);
         track._mood = mood;
@@ -1450,7 +1464,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.engine = 'yt';
             if (ytReady) {
                 ytPlayer.loadVideoById(track.id);
-                ytPlayer.setVolume(100);
+                ytPlayer.setVolume(state.muted ? 0 : state.volume);
                 ytPlayer.unMute();
             } else {
                 pendingVideoId = track.id;
@@ -1462,10 +1476,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function pauseCurrent() {
+        state.userPaused = true;
         if (state.engine === 'audio') audio.pause();
         else if (state.engine === 'yt' && ytReady) ytPlayer.pauseVideo();
     }
     function resumeCurrent() {
+        state.userPaused = false;
         if (state.engine === 'audio') audio.play().catch(() => {});
         else if (state.engine === 'yt' && ytReady) ytPlayer.playVideo();
     }
@@ -1561,16 +1577,32 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.engine === 'yt' && ytReady) return ytPlayer.getCurrentTime();
         return 0;
     }
+    let seekTarget = null, seekTimer = null, lastSeekAt = 0, stallT = null;
+    function watchStall() {   // after a jump, make sure the song really carries on playing
+        clearTimeout(stallT); let tries = 0;
+        const chk = () => {
+            if (state.engine !== 'yt' || !ytReady || state.userPaused) return;
+            const s = ytPlayer.getPlayerState();
+            if (s === 2 || s === 5 || s === -1) { try { ytPlayer.playVideo(); } catch (e) {} }
+            if (++tries < 6) stallT = setTimeout(chk, 1000);
+        };
+        stallT = setTimeout(chk, 800);
+    }
     function seekTo(seconds) {
+        lastSeekAt = Date.now();
         if (state.engine === 'audio') audio.currentTime = seconds;
-        else if (state.engine === 'yt' && ytReady) ytPlayer.seekTo(seconds, true);
+        else if (state.engine === 'yt' && ytReady) { ytPlayer.seekTo(seconds, true); watchStall(); }
         const total = currentDuration();
         if (total > 0) setProgress(seconds, total);
     }
-    function skipBy(seconds) {
+    function skipBy(seconds) {   // quick taps add up and jump once, so the player is not flooded
         const total = currentDuration();
         if (!(total > 0)) return;
-        seekTo(Math.min(Math.max(currentPosition() + seconds, 0), Math.max(total - 0.5, 0)));
+        const base = seekTarget !== null ? seekTarget : currentPosition();
+        seekTarget = Math.min(Math.max(base + seconds, 0), Math.max(total - 1, 0));
+        setProgress(seekTarget, total);
+        clearTimeout(seekTimer);
+        seekTimer = setTimeout(() => { const t = seekTarget; seekTarget = null; seekTo(t); }, 400);
     }
 
     function setShuffle(on) {
@@ -1610,9 +1642,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const t = state.currentTrack;
         if (!t) return;
         setImg(elements.miniThumb, t.thumb);
-        elements.miniTitle.textContent = t.title;
+        elements.miniTitle.textContent = cleanTitle(t.title);
         elements.miniArtist.textContent = t.artist;
-        elements.playerTitle.textContent = t.title;
+        elements.playerTitle.textContent = cleanTitle(t.title);
         elements.playerArtist.innerHTML = escapeHtml(t.artist) + viewsHTML(t.views);
         elements.miniPlayer.classList.remove('hidden');
         updatePlayerArt(t);
@@ -1629,12 +1661,13 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.miniPlayBtn.querySelector('span').textContent = icon;
         elements.fullPlayerOverlay.classList.toggle('playing', state.isPlaying);
         elements.app.classList.toggle('is-playing', state.isPlaying);
+        keepAlive(state.isPlaying && state.engine === 'yt');
     }
 
     function setupMediaSession(track) {
         if (!('mediaSession' in navigator)) return;
         navigator.mediaSession.metadata = new MediaMetadata({
-            title: track.title,
+            title: cleanTitle(track.title),
             artist: track.artist,
             artwork: track.thumb ? [{ src: track.thumb, sizes: '320x180' }] : []
         });
@@ -1663,6 +1696,45 @@ document.addEventListener('DOMContentLoaded', () => {
         // page is back on screen: if the browser paused the song while hidden, start it again
         if (wantPlaying && state.currentTrack && !state.isPlaying) setTimeout(() => { if (!state.isPlaying) resumeCurrent(); }, 300);
     });
+
+    /* ---------------------------------------------------------------------
+       Background play helper, volume, home search
+       --------------------------------------------------------------------- */
+    const KA = new Audio('data:audio/wav;base64,UklGRsQPAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YaAPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+    KA.loop = true;
+    function keepAlive(on) { try { if (on) KA.play().catch(() => {}); else KA.pause(); } catch (e) {} }
+    setInterval(() => {   // phone hid the page and the browser paused the song: ask it to carry on
+        if (document.hidden && wantPlaying && state.currentTrack && !state.userPaused && !state.isPlaying && state.engine) resumeCurrent();
+    }, 2000);
+
+    state.volume = Number(localStorage.getItem('sp_vol') ?? 100); state.muted = false;
+    function applyVolume() {
+        const v = state.muted ? 0 : state.volume;
+        try { audio.volume = v / 100; } catch (e) {}
+        if (ytReady && state.engine === 'yt') { try { ytPlayer.setVolume(v); } catch (e) {} }
+        const ic = $('vol-btn') && $('vol-btn').querySelector('span');
+        if (ic) ic.textContent = v === 0 ? 'volume_off' : v < 35 ? 'volume_mute' : v < 70 ? 'volume_down' : 'volume_up';
+        const sl = $('vol-slider'); if (sl) { sl.value = v; sl.style.setProperty('--v', v + '%'); }
+    }
+    $('vol-slider').addEventListener('input', (e) => { state.volume = +e.target.value; state.muted = state.volume === 0; try { localStorage.setItem('sp_vol', state.volume); } catch (x) {} applyVolume(); });
+    $('vol-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (state.muted || state.volume === 0) { state.muted = false; if (state.volume === 0) state.volume = 60; } else state.muted = true;
+        applyVolume();
+    });
+    applyVolume();
+
+    function goSearch(q) {
+        q = (q || '').trim(); if (!q) return;
+        elements.searchInput.value = q; elements.clearSearchBtn.classList.remove('hidden');
+        setView('search-view'); executeSearch(q);
+    }
+    function renderHomeChips() {
+        const p = state.prefs, sg = ((p && p.singers) || []).slice(0, 3).map(n => ({ label: n, q: n + ' songs' }));
+        $('home-chips').innerHTML = [...sg, ...CHIPS.slice(0, 6)].map(c => `<button class="chip" data-q="${escapeHtml(c.q)}">${escapeHtml(noEmoji(c.label))}</button>`).join('');
+    }
+    $('home-chips').addEventListener('click', (e) => { const c = e.target.closest('.chip'); if (c) goSearch(c.dataset.q); });
+    $('home-search-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') goSearch(e.target.value); });
 
     /* ---------------------------------------------------------------------
        Taste profile + recommendations (so "next" follows what you like)
@@ -1711,7 +1783,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (state.shuffle) fresh = fresh.sort(() => Math.random() - 0.5);
                 fresh.forEach(i => { i._mood = m; });
                 state.queue.push(...fresh);
-                state.source = m ? `${MOODS[m].e} ${MOODS[m].label} mix` : (state.source || 'Your mix');
+                state.source = m ? ` ${MOODS[m].label} mix` : (state.source || 'Your mix');
             } catch (e) { console.error('refill failed', e); }
             finally { refillP = null; renderQueue(); }
         })();
@@ -1731,9 +1803,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function playQueued(track, tab) {
         if (tab === 'next' && state.radio) {
-            const i = state.queue.findIndex(x => x.id === track.id);
-            state.queue = state.queue.slice(i + 1);
-            playTrack(track, [], { radio: true, keep: true });
+            const full = [...state.history, state.currentTrack, ...state.queue].filter(Boolean);
+            const i = full.findIndex(x => x.id === track.id);
+            if (i < 0 || (state.currentTrack && track.id === state.currentTrack.id)) return;
+            state.history = full.slice(0, i); state.queue = full.slice(i + 1);
+            playTrack(track, [], { radio: true, keep: true, back: true });
         } else if (tab === 'next') playTrack(track, state.playlist);
         else playTrack(track, [], { radio: true, mood: track._mood, upnext: tab === 'similar' ? afterTrack(state.similar, track) : [] });
     }
@@ -1743,10 +1817,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const t = state.qTab; let items;
         if (t === 'played') items = [...state.history].reverse();
         else if (t === 'similar') items = state.similar || [];
-        else items = state.radio ? state.queue : state.playlist.slice(state.currentIndex + 1);
-        elements.queueSource.textContent = state.radio ? (state.source || 'Your mix') : (state.playlist.length > 1 ? 'Playlist' : 'Single song');
-        if (!items.length) { showMessage(elements.queueList, 'queue_music', t === 'similar' && !state.similar ? 'Finding similar songs...' : 'Nothing here yet', t === 'next' ? 'More songs load as you listen.' : ''); return; }
-        renderSongList(items.slice(0, 40), elements.queueList, { queue: t });
+        else items = state.radio ? [...state.history, state.currentTrack, ...state.queue].filter(Boolean) : state.playlist;
+        elements.queueSource.textContent = noEmoji(state.radio ? (state.source || 'Your mix') : (state.playlist.length > 1 ? 'Playlist' : 'Single song'));
+        if (!items.length) { state._qSig = ''; showMessage(elements.queueList, 'queue_music', t === 'similar' && !state.similar ? 'Finding similar songs...' : 'Nothing here yet', t === 'next' ? 'More songs load as you listen.' : ''); return; }
+        const sig = t + '|' + items.slice(0, 80).map(x => x.id).join(',');
+        if (sig !== state._qSig) { state._qSig = sig; renderSongList(items.slice(0, 80), elements.queueList, { queue: t }); }   // only redraw when the list really changed
+        else markNowPlaying();
+        if (t === 'next' && window.innerWidth >= 900) { const c = elements.queueList.querySelector('.now-playing'); if (c) c.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
     }
 
     /* ---------------------------------------------------------------------
@@ -1785,7 +1862,7 @@ document.addEventListener('DOMContentLoaded', () => {
         box.innerHTML = l.map((r, i) => {
             const pct = r.dur > 0 ? Math.min(100, r.pos / r.dur * 100) : 0;
             return `<button class="recent-item" data-i="${i}"><span class="rc-img"><img data-src="${escapeHtml(r.thumb || '')}" alt=""><i class="rc-bar" style="width:${pct}%"></i></span>
-                <span class="rc-t"><strong class="truncate">${escapeHtml(r.title)}</strong><small class="truncate">${escapeHtml(r.artist)}${viewsHTML(r.views)}</small>
+                <span class="rc-t"><strong class="truncate">${escapeHtml(cleanTitle(r.title))}</strong><small class="truncate">${escapeHtml(r.artist)}${viewsHTML(r.views)}</small>
                 <small class="rc-time">Played for ${fmtListen(r.pos)}${r.dur ? ' of ' + fmtListen(r.dur) : ''}</small></span>
                 <span class="material-symbols-rounded">play_arrow</span></button>`;
         }).join('');
@@ -1918,7 +1995,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const okMin = () => !st.min || sel.length > 0 || (ckey && obSel[ckey].length > 0);
         ob.innerHTML = `<div class="ob-card"><div class="ob-dots">${steps.map((_, i) => `<i class="${i <= obStep ? 'on' : ''}"></i>`).join('')}</div>
             <h2>${st.t}</h2><p>${st.s} Or type your own below.</p>
-            <div class="ob-grid">${opts.map(([v, l]) => `<button type="button" class="ob-chip${sel.includes(v) ? ' on' : ''}" data-v="${escapeHtml(v)}">${escapeHtml(l)}</button>`).join('')}${customList.map(v => `<button type="button" class="ob-chip on custom" data-c="${escapeHtml(v)}">${escapeHtml(v)}</button>`).join('')}</div>
+            <div class="ob-grid">${opts.map(([v, l]) => `<button type="button" class="ob-chip${sel.includes(v) ? ' on' : ''}" data-v="${escapeHtml(v)}">${escapeHtml(noEmoji(l))}</button>`).join('')}${customList.map(v => `<button type="button" class="ob-chip on custom" data-c="${escapeHtml(v)}">${escapeHtml(v)}</button>`).join('')}</div>
             <div class="ob-custom"><input id="ob-custom-in" type="text" maxlength="40" placeholder="${ph}" autocomplete="off"><button type="button" id="ob-custom-add">Add</button></div>
             <div class="ob-actions">${obStep ? '<button type="button" class="btn-secondary" id="ob-back">Back</button>' : '<span></span>'}
             <button type="button" class="btn-primary" id="ob-next"${okMin() ? '' : ' disabled'}>${last ? 'Build my music' : 'Next'}</button></div></div>`;
@@ -1962,7 +2039,7 @@ document.addEventListener('DOMContentLoaded', () => {
        Search tab: browse tiles, collapsible side menu, offline shell
        --------------------------------------------------------------------- */
     $('browse-grid').innerHTML = Object.keys(MOODS).map(m =>
-        `<button class="browse-tile" data-q="${escapeHtml(MOODS[m].q[0])}" style="--g1:${MOODS[m].g[0]};--g2:${MOODS[m].g[1]}"><strong>${MOODS[m].label}</strong><span>${MOODS[m].e}</span></button>`).join('');
+        `<button class="browse-tile" data-q="${escapeHtml(MOODS[m].q[0])}" style="--g1:${MOODS[m].g[0]};--g2:${MOODS[m].g[1]}"><strong>${MOODS[m].label}</strong></button>`).join('');
     $('browse-grid').addEventListener('click', (e) => {
         const t = e.target.closest('.browse-tile'); if (!t) return;
         elements.searchInput.value = t.dataset.q; elements.clearSearchBtn.classList.remove('hidden'); executeSearch(t.dataset.q);
@@ -1986,9 +2063,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }), { root: elements.contentArea, rootMargin: '300px' });
 
     function buildShelves() {
+        renderHomeChips();
         const p = state.prefs, top = topMood(), L = (p && p.langs.length) ? p.langs : ['Hindi'], lq = L[0].toLowerCase();
         shelfList = [{ t: 'Latest songs', q: `latest ${lq} songs 2026`, k: 'list', all: 1, n: 6 }];
-        if (top) shelfList.push({ t: `Because you like ${MOODS[top].label} ${MOODS[top].e}`, q: moodQuery(top), k: 'rows', all: 1, m: top });
+        if (top) shelfList.push({ t: `Because you like ${MOODS[top].label}`, q: moodQuery(top), k: 'rows', all: 1, m: top });
         shelfList.push({ t: 'Mood stations', k: 'stations', ms: ((p && p.genres.length) ? p.genres : ['romantic', 'retro', 'party', 'lofi', 'sad']).slice(0, 6) });
         if (p) {
             const sg = p.singers.slice(0, 3), gn = p.genres.slice(0, 3);
@@ -2003,6 +2081,7 @@ document.addEventListener('DOMContentLoaded', () => {
         shelfList.push({ t: 'Covers and remixes', q: 'hindi lofi remix songs', k: 'rows', all: 1, m: 'lofi' });
         if (!p) shelfList.push(...SHELVES.filter(s => s.k === 'cards'));
         shelfList.push({ t: 'Music videos for you', q: `new ${lq} music video 2026`, k: 'wide' });
+        shelfList.forEach(s => { if (s.k === 'rows') s.k = 'cards'; s.t = noEmoji(s.t); });
         const ord = JSON.parse(localStorage.getItem(orderKey()) || '[]'), hid = JSON.parse(localStorage.getItem(hiddenKey()) || '[]');
         shelfList = shelfList.map((s, i) => [s, i]).sort((a, b) => {
             const x = ord.indexOf(shelfKey(a[0])), y = ord.indexOf(shelfKey(b[0]));
@@ -2029,7 +2108,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!items.length) throw new Error('empty');
             items.forEach(i => { i._mood = m; });
             playTrack(items[0], [], { radio: true, mood: m });
-            state.queue = items.slice(1, 9); state.source = `${MOODS[m].e} ${MOODS[m].label} radio`; renderQueue();
+            state.queue = items.slice(1, 9); state.source = ` ${MOODS[m].label} radio`; renderQueue();
         } catch (e) { showToast('Could not start radio - please try again'); }
     }
 
@@ -2060,14 +2139,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
             const play = (i) => playTrack(i, items, { radio: true, mood: s.m || detectMood(i.title + ' ' + i.artist), upnext: afterTrack(items, i) });
-            const row = (it, i) => `<button class="mini-row" data-i="${i}"><img data-src="${escapeHtml(it.thumb)}" alt=""><span class="mr-t"><strong class="truncate">${escapeHtml(it.title)}</strong><small class="truncate">${escapeHtml(it.artist)}${viewsHTML(it.views)}${it.duration ? ' • ' + escapeHtml(it.duration) : ''}</small></span></button>`;
+            const row = (it, i) => `<button class="mini-row" data-i="${i}"><img data-src="${escapeHtml(it.thumb)}" alt=""><span class="mr-t"><strong class="truncate">${escapeHtml(cleanTitle(it.title))}</strong><small class="truncate">${escapeHtml(it.artist)}${viewsHTML(it.views)}${it.duration ? ' • ' + escapeHtml(it.duration) : ''}</small></span></button>`;
             if (s.k === 'list') body.innerHTML = items.map(row).join('');
             else if (s.k === 'rows') {
                 let cols = '';
                 for (let c = 0; c < items.length; c += 4) cols += '<div class="rowcol">' + items.slice(c, c + 4).map((it, k) => row(it, c + k)).join('') + '</div>';
                 body.innerHTML = cols;
             } else {
-                body.innerHTML = items.map((it, i) => `<button class="card" data-i="${i}"><img alt=""><strong class="truncate">${escapeHtml(it.title)}</strong><small class="truncate">${escapeHtml(it.artist)}${viewsHTML(it.views)}</small></button>`).join('');
+                body.innerHTML = items.map((it, i) => `<button class="card" data-i="${i}"><img alt=""><strong class="truncate">${escapeHtml(cleanTitle(it.title))}</strong><small class="truncate">${escapeHtml(it.artist)}${viewsHTML(it.views)}</small></button>`).join('');
                 body.querySelectorAll('.card').forEach((c, i) => hd(c.querySelector('img'), items[i]));
             }
             body.querySelectorAll('img[data-src]').forEach(im => setImg(im, im.dataset.src));
@@ -2081,6 +2160,7 @@ document.addEventListener('DOMContentLoaded', () => {
        Playback speed (1x - 2x)
        --------------------------------------------------------------------- */
     function applySpeed() {
+        applyVolume();
         const r = state.speed;
         try { audio.defaultPlaybackRate = r; audio.playbackRate = r; audio.preservesPitch = true; } catch (e) {}
         let shown = r;
@@ -2109,7 +2189,7 @@ document.addEventListener('DOMContentLoaded', () => {
        Cover animation: waves moving in a circle around the artwork
        --------------------------------------------------------------------- */
     const cv = $('wave-canvas'), cx = cv.getContext('2d');
-    let waveCols = ['#8b5cf6', '#a855f7'], wt = 0, amp = 0.2;
+    let waveCols = ['#7e62c4', '#8a63d2'], wt = 0, amp = 0.2;
     const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
     function setWaveColors(t) {
         const g = GRADS[hashStr(String(t.id)) % GRADS.length]; waveCols = g;

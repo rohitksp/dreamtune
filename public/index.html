@@ -130,6 +130,13 @@
 
             <!-- PAGE 2: HOME -->
             <section id="home-view" class="view-panel active">
+                <div class="home-search">
+                    <div class="search-input-wrapper">
+                        <span class="material-symbols-rounded search-icon">search</span>
+                        <input type="text" id="home-search-input" placeholder="Search songs, artists..." autocomplete="off">
+                    </div>
+                    <div id="home-chips" class="chip-row"></div>
+                </div>
                 <div id="home-shelves" class="shelves"></div>
             </section>
 
@@ -178,6 +185,10 @@
                 <button id="mini-prev-btn" class="icon-btn mini-prev" aria-label="Previous"><span class="material-symbols-rounded">skip_previous</span></button>
                 <button id="mini-play-btn" class="icon-btn"><span class="material-symbols-rounded">play_arrow</span></button>
                 <button id="mini-next-btn" class="icon-btn"><span class="material-symbols-rounded">skip_next</span></button>
+            </div>
+            <div class="mini-volume">
+                <button id="vol-btn" class="icon-btn" aria-label="Mute"><span class="material-symbols-rounded">volume_up</span></button>
+                <input type="range" id="vol-slider" class="vol-slider" min="0" max="100" value="100" aria-label="Volume">
             </div>
         </div>
 
