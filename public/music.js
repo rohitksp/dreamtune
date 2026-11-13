@@ -913,13 +913,22 @@ document.addEventListener('DOMContentLoaded', () => {
         state.downloading.add(track.id); updateDownloadButtons();
         showToast('Downloading "' + cleanTitle(track.title) + '"...', 2500);
         try {
-            AC.keep.add(track.id);
-            const blob = await ensureAudio(track.id);
-            if (!blob || !blob.size) throw new Error('empty file');
-            let onPhone = false;
-            try { onPhone = await saveToPhone(blob, track); } catch (e) { console.warn('save to phone failed:', e); }
+            let blob = null, onPhone = false, uri = '';
+            if (IS_NATIVE && NP.ok) {      // the phone downloads the song itself and puts it in Music/DreamTune
+                try {
+                    await nat('KeepAlive', 'askStorage');
+                    const r = await nat('KeepAlive', 'nDownload', npMeta(track));
+                    uri = (r && r.uri) || ''; onPhone = !!uri;
+                } catch (e) { console.warn('native download failed:', e && e.message); }
+            }
+            if (!uri) {
+                AC.keep.add(track.id);
+                blob = await ensureAudio(track.id);
+                if (!blob || !blob.size) throw new Error('empty file');
+                try { onPhone = await saveToPhone(blob, track); } catch (e) { console.warn('save to phone failed:', e); }
+            }
             await dbPut('downloads', { id: track.id, title: track.title, artist: track.artist, thumb: track.thumb || '', duration: track.duration || '',
-                                       views: track.views || 0, blob, size: blob.size, onPhone, savedAt: Date.now() });
+                                       views: track.views || 0, blob, uri, size: blob ? blob.size : 0, onPhone, savedAt: Date.now() });
             await refreshLibrary();
             showToast(onPhone ? 'Downloaded - saved in Music/DreamTune on your phone' : 'Downloaded - find it in Library > Downloads', 3500);
         } catch (err) {
@@ -1643,7 +1652,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     var kaOn = false, kaKey = '', kaTimer = null, kaAsked = false;
     function nativeKeep(playing) {      // foreground service = Android keeps the app and the music alive with the screen off
-        if (!IS_NATIVE) return;
+        if (!IS_NATIVE || NP.active) return;
         clearTimeout(kaTimer);
         const t = state.currentTrack, key = t ? t.id : '';
         if (playing) {
@@ -1784,7 +1793,8 @@ document.addEventListener('DOMContentLoaded', () => {
     /* ---------------------------------------------------------------------
        Playback controller  (shuffle, repeat, +/-10s)
        --------------------------------------------------------------------- */
-    function stopEngines(keepYT) {
+    function stopEngines(keepYT, keepNative) {
+        if (!keepNative && IS_NATIVE && NP.active) { NP.active = false; nat('KeepAlive', 'nStop').catch(() => {}); }
         state.engine = null;
         stopProgressTracker();
         clearTimeout(loadWatch);
@@ -1792,6 +1802,77 @@ document.addEventListener('DOMContentLoaded', () => {
         if (ytReady && !keepYT) { try { ytPlayer.stopVideo(); } catch (e) {} }     // YT -> YT: no stop, that left the player stuck between songs
         pendingVideoId = null;
     }
+
+    /* ---------------------------------------------------------------------
+       Native player (Android app): ExoPlayer inside a foreground media service.
+       It keeps playing with the screen off and even moves to the next song by itself.
+       If it cannot work, the old players below are used.
+       --------------------------------------------------------------------- */
+    const NP = { ok: true, fails: 0, active: false, endHandled: false, cmdSeq: 0, advSeq: 0, queuedFor: '', pos: 0, dur: 0, inited: false, adopt: null };
+    function npMeta(t) { const d = state.downloads.get(t.id); return { id: t.id, uri: (d && d.uri) || '', title: cleanTitle(t.title), artist: t.artist || '', thumb: t.thumb || '' }; }
+    const hasDl = (id) => { const d = state.downloads.get(id); return !!(d && (d.blob || d.uri)); };
+
+    function npAskPerms() {
+        if (kaAsked) return; kaAsked = true;
+        nat('KeepAlive', 'askNotifications').catch(() => {}).then(() => nat('KeepAlive', 'batteryExempt')).catch(() => {});
+    }
+
+    async function startNative(track, token, adopt) {
+        state.engine = 'native'; NP.active = true; NP.endHandled = false; NP.queuedFor = '';
+        if (adopt) { state.loading = false; state.isPlaying = true; updatePlayButtons(); return; }
+        state.loading = true; updatePlayButtons();
+        npAskPerms();
+        try {
+            await nat('KeepAlive', 'nPlay', npMeta(track));
+            if (token !== playToken) return;
+            NP.fails = 0; applySpeed();
+            if (state.resumeAt) { const r = state.resumeAt; state.resumeAt = 0; seekTo(r); }
+        } catch (e) {
+            if (token !== playToken) return;
+            console.warn('native player failed:', e && e.message);
+            if (e && e.message === 'cancelled') return;
+            NP.fails++; if (NP.fails >= 2) NP.ok = false;
+            NP.active = false; state.engine = null;
+            if (!navigator.onLine) { state.loading = false; updatePlayButtons(); showToast('Could not play this song'); return; }
+            showToast('Switching player...', 1500);
+            if (streamUsable(track)) startStreamed(track, token); else startYT(track, token, true);
+        }
+    }
+
+    function npQueueNext() {      // tell the native player what comes next, so it can carry on alone
+        if (state.engine !== 'native' || state.repeat === 'one' || state.shuffle) return;
+        const n = (state.radio ? state.queue : state.playlist.slice(state.currentIndex + 1))[0];
+        if (!n || n.isLocal || !(isYTid(n.id) || hasDl(n.id))) return;
+        nat('KeepAlive', 'nSetNext', npMeta(n)).catch(() => {});
+    }
+
+    async function npPoll() {
+        if (!IS_NATIVE || state.engine !== 'native') return;
+        let r; try { r = await nat('KeepAlive', 'nState'); } catch (e) { return; }
+        if (state.engine !== 'native') return;
+        if (!NP.inited) { NP.inited = true; NP.cmdSeq = r.cmdSeq; NP.advSeq = r.advSeq; return; }
+        if (r.advSeq !== NP.advSeq) { NP.advSeq = r.advSeq; NP.adopt = r.id; playNextTrack(); return; }          // native moved on by itself
+        if (r.cmdSeq !== NP.cmdSeq) {                                                                             // notification / lock-screen buttons
+            NP.cmdSeq = r.cmdSeq;
+            if (r.cmd === 'next') { playNextTrack(); return; }
+            if (r.cmd === 'prev') { playPrevTrack(); return; }
+            if (r.cmd === 'error' && state.currentTrack) { showToast('This song cannot be played - skipping'); setTimeout(() => { if (state.engine === 'native') playNextTrack(); }, 1200); return; }
+        }
+        const cur = state.currentTrack;
+        if (!cur || r.id !== cur.id) return;
+        NP.pos = r.pos / 1000; NP.dur = r.dur / 1000;
+        if (NP.dur > 0 && seekTarget === null) setProgress(NP.pos, NP.dur);
+        const playing = !!r.playing, loading = r.st === 2 && !playing;
+        if (playing) state.userPaused = false;
+        else if (r.st === 3 && state.isPlaying) state.userPaused = true;                                         // paused from the notification
+        if (playing !== state.isPlaying || loading !== state.loading) {
+            state.isPlaying = playing; state.loading = loading; updatePlayButtons();
+            if (playing) applySpeed();
+        }
+        if (playing && NP.queuedFor !== r.id) { NP.queuedFor = r.id; npQueueNext(); }
+        if (r.st === 4 && !NP.endHandled) { NP.endHandled = true; state.isPlaying = false; updatePlayButtons(); onTrackEnded(); }
+    }
+    setInterval(npPoll, 700);
 
     function playTrack(track, playlistContext = [], opts = {}) {
         state.radio = !!opts.radio;
@@ -1823,15 +1904,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const saved = state.songs.get(track.id);
         const dlRec = state.downloads.get(track.id);
         const blob = track.audioBlob || (saved && saved.audioBlob) || (dlRec && dlRec.blob);
+        const adopt = NP.adopt === track.id; NP.adopt = null;
+        const viaNative = IS_NATIVE && NP.ok && !track.isLocal && !blob && ((dlRec && dlRec.uri) || (isYTid(track.id) && navigator.onLine));
 
-        if (!track.isLocal && !blob && !navigator.onLine) {
+        if (!track.isLocal && !blob && !viaNative && !navigator.onLine) {
             showToast('You are offline and this song is not downloaded');
             return;
         }
 
         const token = ++playToken;
-        const viaStream = !track.isLocal && !blob && streamUsable(track);
-        stopEngines(!track.isLocal && !blob && !viaStream);
+        const viaStream = !track.isLocal && !blob && !viaNative && streamUsable(track);
+        stopEngines(!track.isLocal && !blob && !viaStream && !viaNative, viaNative);
         resetProgress();
         state.isPlaying = false; state.loading = false;
         updateTrackUI();
@@ -1839,7 +1922,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (state.objectUrl) { URL.revokeObjectURL(state.objectUrl); state.objectUrl = null; }
 
-        if (track.isLocal || blob) {
+        if (viaNative) {
+            startNative(track, token, adopt);
+        } else if (track.isLocal || blob) {
             state.engine = 'audio';
             if (blob) state.objectUrl = URL.createObjectURL(blob);
             audio.src = blob ? state.objectUrl : track.streamUrl;
@@ -1859,12 +1944,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function pauseCurrent() {
         state.userPaused = true;
-        if (state.engine === 'audio') audio.pause();
+        if (state.engine === 'native') nat('KeepAlive', 'nPause').catch(() => {});
+        else if (state.engine === 'audio') audio.pause();
         else if (state.engine === 'yt' && ytReady) ytPlayer.pauseVideo();
     }
     function resumeCurrent() {
         state.userPaused = false;
-        if (state.engine === 'audio') audio.play().catch(() => {});
+        if (state.engine === 'native') nat('KeepAlive', 'nResume').catch(() => {});
+        else if (state.engine === 'audio') audio.play().catch(() => {});
         else if (state.engine === 'yt' && ytReady) ytPlayer.playVideo();
     }
     function togglePlayPause() {
@@ -1886,7 +1973,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function playNextTrack() {
         if (!navigator.onLine) {
-            const ok = (t) => t.isLocal || t.audioBlob || (state.songs.get(t.id) || {}).audioBlob || (state.downloads.get(t.id) || {}).blob;
+            const ok = (t) => t.isLocal || t.audioBlob || (state.songs.get(t.id) || {}).audioBlob || hasDl(t.id);
             const pool = (state.radio || state.playlist.length < 2) ? [...state.songs.values()].filter(ok) : state.playlist;
             const cur = state.currentTrack, idx = pool.findIndex(t => cur && t.id === cur.id);
             for (let k = 1; k <= pool.length; k++) {
@@ -1932,8 +2019,7 @@ document.addEventListener('DOMContentLoaded', () => {
             playTrack(p, [], { radio: true, keep: true, back: true });
             return;
         }
-        const pos = state.engine === 'audio' ? audio.currentTime
-                  : (state.engine === 'yt' && ytReady ? ytPlayer.getCurrentTime() : 0);
+        const pos = currentPosition();
         if (pos > 3) { seekTo(0); return; }                // restart current song first
 
         if (state.shuffle && state.shuffleHistory.length) {
@@ -1950,11 +2036,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function currentDuration() {
+        if (state.engine === 'native') return NP.dur;
         if (state.engine === 'audio') return audio.duration;
         if (state.engine === 'yt' && ytReady) return ytPlayer.getDuration();
         return 0;
     }
     function currentPosition() {
+        if (state.engine === 'native') return NP.pos;
         if (state.engine === 'audio') return audio.currentTime;
         if (state.engine === 'yt' && ytReady) return ytPlayer.getCurrentTime();
         return 0;
@@ -1972,7 +2060,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function seekTo(seconds) {
         lastSeekAt = Date.now();
-        if (state.engine === 'audio') audio.currentTime = seconds;
+        if (state.engine === 'native') { NP.endHandled = false; NP.pos = seconds; nat('KeepAlive', 'nSeek', { ms: Math.round(seconds * 1000) }).catch(() => {}); }
+        else if (state.engine === 'audio') audio.currentTime = seconds;
         else if (state.engine === 'yt' && ytReady) { ytPlayer.seekTo(seconds, true); watchStall(); }
         const total = currentDuration();
         if (total > 0) setProgress(seconds, total);
@@ -2093,6 +2182,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyVolume() {
         const v = state.muted ? 0 : state.volume;
         try { audio.volume = v / 100; } catch (e) {}
+        if (IS_NATIVE && state.engine === 'native') nat('KeepAlive', 'nVolume', { v: v / 100 }).catch(() => {});
         if (ytReady && state.engine === 'yt') { try { ytPlayer.setVolume(v); } catch (e) {} }
         const ic = $('vol-btn') && $('vol-btn').querySelector('span');
         if (ic) ic.textContent = v === 0 ? 'volume_off' : v < 35 ? 'volume_mute' : v < 70 ? 'volume_down' : 'volume_up';
@@ -2559,6 +2649,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function applySpeed() {
         applyVolume();
         const r = state.speed;
+        if (IS_NATIVE && state.engine === 'native') nat('KeepAlive', 'nSpeed', { speed: r }).catch(() => {});
         try { audio.defaultPlaybackRate = r; audio.playbackRate = r; audio.preservesPitch = true; } catch (e) {}
         let shown = r;
         if (ytReady && state.engine === 'yt') {
