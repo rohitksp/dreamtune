@@ -12,6 +12,7 @@ import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.PlaybackParameters;
 import androidx.media3.exoplayer.ExoPlayer;
 
+import java.io.File;
 import java.io.InputStream;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,6 +35,9 @@ final class NativePlayer {
 
     static class Meta { String id, uri, title, artist, thumb; volatile Uri src; }
     static volatile Meta next = null;
+    static volatile Meta curMeta = null;
+    static volatile int retry = 0;
+    static volatile String lastErr = "";
 
     static void snapshot(ExoPlayer p) {
         try {
@@ -57,7 +61,28 @@ final class NativePlayer {
     }
 
     static void command(String c) { cmd = c; cmdSeq++; }
-    static void onError() { st = 1; playing = false; command("error"); }
+    private static void giveUp() { st = 1; playing = false; command("error"); }
+
+    /** playback error (for example after jumping to the middle of a song): reload the song and carry on from the same spot.
+     *  1st try: same file. 2nd try: download the file again. Only then give up and let the web app skip. */
+    static void onError(String code) {
+        lastErr = code == null ? "" : code;
+        final Meta m = curMeta;
+        final PlayerService s = PlayerService.instance;
+        if (m == null || s == null || s.exo == null || retry >= 2) { giveUp(); return; }
+        final int attempt = ++retry, my = token;
+        final long at = Math.max(0, s.exo.getCurrentPosition());
+        pool.execute(() -> {
+            try {
+                if (attempt == 2) { m.src = null; new File(new File(s.getCacheDir(), "yt"), m.id + ".m4a").delete(); }
+                final Uri src = m.src != null ? m.src : resolveSource(s, m, () -> token != my);
+                m.src = src;
+                main.post(() -> { if (token == my) startItem(src, m, at); });
+            } catch (Exception e) {
+                main.post(() -> giveUp());
+            }
+        });
+    }
 
     private static boolean readable(Context c, String uri) {
         if (uri == null || uri.isEmpty()) return false;
@@ -77,13 +102,16 @@ final class NativePlayer {
     }
 
     // must run on the main thread
-    private static void startItem(Uri src, Meta m) {
+    private static void startItem(Uri src, Meta m) { startItem(src, m, 0); }
+
+    private static void startItem(Uri src, Meta m, long startMs) {
         PlayerService s = PlayerService.instance;
         if (s == null || s.exo == null) return;
-        s.exo.setMediaItem(item(src, m));
+        curMeta = m;
+        s.exo.setMediaItem(item(src, m), startMs);
         s.exo.prepare();
         s.exo.play();
-        curId = m.id; st = 2; playing = false; pos = 0;
+        curId = m.id; st = 2; playing = false; pos = startMs;
     }
 
     private static boolean ensureService(Context c) {
@@ -97,7 +125,7 @@ final class NativePlayer {
 
     static void play(final Context ctx, final Meta m, final Cb cb) {
         final int my = ++token;
-        next = null;
+        next = null; retry = 0;
         main.post(() -> { PlayerService s = PlayerService.instance; if (s != null && s.exo != null) s.exo.pause(); });
         pool.execute(() -> {
             try {
@@ -105,6 +133,7 @@ final class NativePlayer {
                 if (token != my) { cb.done(false, "cancelled"); return; }
                 if (!ensureService(ctx)) { cb.done(false, "player service did not start"); return; }
                 final Uri fsrc = src;
+                m.src = fsrc;
                 main.post(() -> { if (token == my) startItem(fsrc, m); });
                 cb.done(true, null);
             } catch (Exception e) {
@@ -124,7 +153,7 @@ final class NativePlayer {
     static void onEnded() {
         Meta n = next;
         if (n != null && n.src != null) {
-            next = null; token++;
+            next = null; token++; retry = 0;
             advSeq++;
             startItem(n.src, n);
         }

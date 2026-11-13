@@ -1,5 +1,6 @@
 package com.rohit.dreamtune.app;
 
+import android.app.PendingIntent;
 import android.content.Intent;
 
 import androidx.annotation.Nullable;
@@ -41,7 +42,12 @@ public class PlayerService extends MediaSessionService {
             @Override public void seekToPrevious() { NativePlayer.command("prev"); }
             @Override public void seekToPreviousMediaItem() { NativePlayer.command("prev"); }
         };
-        session = new MediaSession.Builder(this, wrapped).build();
+        Intent launch = getPackageManager().getLaunchIntentForPackage(getPackageName());
+        PendingIntent open = PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        session = new MediaSession.Builder(this, wrapped).setSessionActivity(open).build();
+        // IMPORTANT: we start this service ourselves (nobody "binds" to it), so the session must be registered by hand,
+        // otherwise Android never shows the notification / lock-screen player.
+        addSession(session);
 
         exo.addListener(new Player.Listener() {
             @Override public void onPlaybackStateChanged(int state) {
@@ -49,7 +55,7 @@ public class PlayerService extends MediaSessionService {
                 if (state == Player.STATE_ENDED) NativePlayer.onEnded();
             }
             @Override public void onIsPlayingChanged(boolean playing) { NativePlayer.snapshot(exo); }
-            @Override public void onPlayerError(PlaybackException error) { NativePlayer.onError(); }
+            @Override public void onPlayerError(PlaybackException error) { NativePlayer.onError(error.getErrorCodeName()); }
         });
         instance = this;
         NativePlayer.startTicker();

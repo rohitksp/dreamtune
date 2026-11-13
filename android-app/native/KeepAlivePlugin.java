@@ -225,6 +225,7 @@ public class KeepAlivePlugin extends Plugin {
         r.put("advSeq", NativePlayer.advSeq);
         r.put("cmdSeq", NativePlayer.cmdSeq);
         r.put("cmd", NativePlayer.cmd);
+        r.put("err", NativePlayer.lastErr);
         call.resolve(r);
     }
 
