@@ -1272,3 +1272,7 @@ html { font-size: 14.5px; }
     .shelf-body.k-cards.v-lg  { grid-auto-columns: 300px; }
     .shelf-body.k-wide.v-wide { grid-auto-columns: 380px; }
 }
+
+/* download button */
+.player-header-right { display: flex; align-items: center; gap: 2px; }
+.dl-btn.active .material-symbols-rounded { color: #34d399; }

@@ -101,6 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
         playlists: [],             // [{id, name, createdAt, updatedAt, songIds:[]}]
         openPlaylistId: null,
         downloading: new Set(),
+        downloads: new Map(),
         localTracks: [],
         objectUrl: null,
         resumeAt: 0, prefs: null, radio: false, queue: [], history: [], taste: {}, recentMoods: [], speed: 1, qTab: 'next', source: '', similar: null
@@ -635,12 +636,13 @@ document.addEventListener('DOMContentLoaded', () => {
        --------------------------------------------------------------------- */
     function openDatabase(name) {
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open(name, 2);
+            const request = indexedDB.open(name, 3);
             request.onupgradeneeded = (e) => {
                 const database = e.target.result;
                 if (!database.objectStoreNames.contains('songs')) database.createObjectStore('songs', { keyPath: 'id' });
                 if (!database.objectStoreNames.contains('playlists')) database.createObjectStore('playlists', { keyPath: 'id' });
                 if (!database.objectStoreNames.contains('cache')) database.createObjectStore('cache', { keyPath: 'id' });   // songs fetched ahead of time
+                if (!database.objectStoreNames.contains('downloads')) database.createObjectStore('downloads', { keyPath: 'id' });   // songs you chose to download
             };
             request.onsuccess = (e) => resolve(e.target.result);
             request.onerror = () => reject(request.error);
@@ -664,7 +666,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function refreshLibrary() {
         if (!state.db) return;
-        const [songs, playlists] = await Promise.all([dbAll('songs'), dbAll('playlists')]);
+        const [songs, playlists, dls] = await Promise.all([dbAll('songs'), dbAll('playlists'), dbAll('downloads').catch(() => [])]);
+        state.downloads = new Map(dls.map(d => [d.id, d]));
         playlists.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
         state.songs = new Map(songs.map(s => [s.id, s]));
         state.playlists = playlists;
@@ -866,10 +869,90 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+
+    /* ---------------------------------------------------------------------
+       Download a song (like Spotify / YouTube Music "Download")
+       - always kept inside the app (Library > Downloads), plays with no internet
+       - in the Android app it is ALSO saved as a real file in  Music/DreamTune  on the phone
+       --------------------------------------------------------------------- */
+    const DL_ID = 'dl-view';
+    const safeName = (t) => String(t || 'song').replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90) || 'song';
+
+    function blobChunkB64(blob, start, end) {
+        return new Promise((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+            fr.onerror = () => reject(fr.error);
+            fr.readAsDataURL(blob.slice(start, end));
+        });
+    }
+
+    async function saveToPhone(blob, track) {
+        if (!IS_NATIVE) return false;
+        await nat('KeepAlive', 'askStorage');
+        const name = safeName(cleanTitle(track.title) + ' - ' + track.artist) + '.m4a';
+        const STEP = 3 * 131072;            // multiple of 3 so every piece is valid base64
+        for (let at = 0; at < blob.size || at === 0; at += STEP) {
+            const end = Math.min(at + STEP, blob.size);
+            await nat('KeepAlive', 'saveAudio', {
+                name, mime: 'audio/mp4', title: cleanTitle(track.title), artist: track.artist,
+                data: await blobChunkB64(blob, at, end), first: at === 0, last: end >= blob.size
+            });
+            if (end >= blob.size) break;
+        }
+        return true;
+    }
+
+    async function downloadSong(track) {
+        if (!track || track.isLocal) { showToast('Phone songs are already on your device'); return; }
+        if (!state.db) { showToast('Please wait - library is loading'); return; }
+        if (state.downloads.has(track.id)) { showToast('Already downloaded'); return; }
+        if (state.downloading.has(track.id)) { showToast('Download in progress...'); return; }
+        if (!navigator.onLine) { showToast('Connect to the internet to download'); return; }
+        if (!isYTid(track.id)) { showToast('This song cannot be downloaded'); return; }
+        state.downloading.add(track.id); updateDownloadButtons();
+        showToast('Downloading "' + cleanTitle(track.title) + '"...', 2500);
+        try {
+            AC.keep.add(track.id);
+            const blob = await ensureAudio(track.id);
+            if (!blob || !blob.size) throw new Error('empty file');
+            let onPhone = false;
+            try { onPhone = await saveToPhone(blob, track); } catch (e) { console.warn('save to phone failed:', e); }
+            await dbPut('downloads', { id: track.id, title: track.title, artist: track.artist, thumb: track.thumb || '', duration: track.duration || '',
+                                       views: track.views || 0, blob, size: blob.size, onPhone, savedAt: Date.now() });
+            await refreshLibrary();
+            showToast(onPhone ? 'Downloaded - saved in Music/DreamTune on your phone' : 'Downloaded - find it in Library > Downloads', 3500);
+        } catch (err) {
+            console.error('Download failed:', err);
+            showToast('Download failed - check your internet and try again', 4000);
+        } finally {
+            AC.keep.delete(track.id);
+            state.downloading.delete(track.id); updateDownloadButtons();
+        }
+    }
+
+    async function removeDownload(track) {
+        await dbDel('downloads', track.id);
+        await refreshLibrary();
+        showToast('Removed from Downloads' + (IS_NATIVE ? ' (the copy in your phone Music folder stays)' : ''), 3000);
+    }
+
+    function updateDownloadButtons() {
+        document.querySelectorAll('.dl-btn').forEach(b => {
+            const id = b.dataset.id || (state.currentTrack && state.currentTrack.id);
+            const done = state.downloads.has(id), busy = state.downloading.has(id);
+            const sp = b.querySelector('span');
+            sp.textContent = done ? 'download_done' : (busy ? 'progress_activity' : 'download');
+            sp.classList.toggle('spin', busy);
+            b.classList.toggle('active', done);
+        });
+    }
+
     const isLiked = (id) => { const p = state.playlists.find(p => p.id === LIKED_ID); return !!p && p.songIds.includes(id); };
     const userPls = () => state.playlists.filter(p => p.id !== LIKED_ID);
 
     function updateHearts() {
+        updateDownloadButtons();
         document.querySelectorAll('.heart-btn').forEach(btn => {
             const id = btn.dataset.id, icon = btn.querySelector('span');
             const dl = state.downloading.has(id), liked = isLiked(id);
@@ -1028,8 +1111,46 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="liked-text"><h3>Liked Songs</h3><p>${ids.length} song${ids.length === 1 ? '' : 's'} you loved</p></div><div class="liked-thumbs">${th}</div></div>`;
     }
 
+    function dlList() { return [...state.downloads.values()].sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)); }
+
+    function downloadsCard() {
+        const l = dlList(), th = l.slice(0, 3).filter(s => s.thumb).map(s => `<img src="${escapeHtml(s.thumb)}" alt="">`).join('');
+        return `<div class="liked-card" id="downloads-card"><div class="liked-art"><span class="material-symbols-rounded">download_done</span></div>
+            <div class="liked-text"><h3>Downloads</h3><p>${l.length} song${l.length === 1 ? '' : 's'} ${IS_NATIVE ? 'on your phone' : 'saved offline'}</p></div><div class="liked-thumbs">${th}</div></div>`;
+    }
+
+    function renderDownloadsDetail(root) {
+        const songs = dlList();
+        root.innerHTML = `
+            <div class="pl-hero" style="background:${gradientFor(DL_ID)}">
+                <button class="icon-btn" id="back-to-playlists" aria-label="Back"><span class="material-symbols-rounded">arrow_back</span></button>
+                <div class="pl-hero-body">
+                    <div class="pl-hero-cover"><span class="material-symbols-rounded">download_done</span></div>
+                    <div class="pl-hero-text">
+                        <p class="pl-hero-label">DOWNLOADS</p>
+                        <h2>Downloaded songs</h2>
+                        <p class="pl-hero-count">${songs.length} song${songs.length === 1 ? '' : 's'}${IS_NATIVE ? ' • also in Music/DreamTune on your phone' : ''}</p>
+                    </div>
+                </div>
+                ${songs.length ? `<div class="pl-hero-actions">
+                    <button class="btn-white" id="play-all-btn"><span class="material-symbols-rounded">play_arrow</span><span>Play all</span></button>
+                    <button class="btn-glass" id="shuffle-play-btn"><span class="material-symbols-rounded">shuffle</span><span>Shuffle</span></button>
+                </div>` : ''}
+            </div>
+            <div id="playlist-songs" class="song-list"></div>`;
+        $('back-to-playlists').addEventListener('click', () => { state.openPlaylistId = null; renderWishlistView(); });
+        const pa = $('play-all-btn'); if (pa) pa.addEventListener('click', () => { setShuffle(false); playTrack(songs[0], songs); });
+        const sp = $('shuffle-play-btn'); if (sp) sp.addEventListener('click', () => { setShuffle(true); playTrack(songs[Math.floor(Math.random() * songs.length)], songs); });
+        renderSongList(songs, $('playlist-songs'), {
+            remove: true, onRemove: (t) => removeDownload(t),
+            emptyIcon: 'download', emptyTitle: 'No downloads yet',
+            emptyText: 'Tap the download arrow on any song. It will play here without internet.'
+        });
+    }
+
     function renderWishlistView() {
         const root = elements.wishlistContent;
+        if (state.openPlaylistId === DL_ID) { renderDownloadsDetail(root); return; }
         const open = state.playlists.find(p => p.id === state.openPlaylistId);
         if (open) { renderPlaylistDetail(root, open); return; }
         state.openPlaylistId = null;
@@ -1046,9 +1167,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 </button>
             </div>
             ${likedCard()}
+            ${downloadsCard()}
             <h3 class="section-heading"><span class="material-symbols-rounded">library_music</span>Playlists</h3>
             <div id="playlist-grid" class="pl-grid"></div>`;
         $('new-playlist-btn').addEventListener('click', () => openCreatePlaylistModal());
+        $('downloads-card').addEventListener('click', () => { state.openPlaylistId = DL_ID; renderWishlistView(); elements.contentArea.scrollTop = 0; });
         $('liked-card').addEventListener('click', () => {
             if (!state.playlists.some(p => p.id === LIKED_ID)) { showToast('Tap the heart on any song to like it'); return; }
             state.openPlaylistId = LIKED_ID; renderWishlistView();
@@ -1348,7 +1471,7 @@ document.addEventListener('DOMContentLoaded', () => {
        --------------------------------------------------------------------- */
     function cardHTML(s, i, opts) {
         const saved = state.songs.get(s.id);
-        const offline = s.audioBlob || (saved && saved.audioBlob);
+        const offline = s.audioBlob || (saved && saved.audioBlob) || state.downloads.has(s.id);
         return `
             <div class="song-card" data-index="${i}" data-track-id="${escapeHtml(s.id)}">
                 <div class="song-info">
@@ -1365,6 +1488,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="song-actions">
                     <button class="icon-btn heart-btn" data-id="${escapeHtml(s.id)}" aria-label="Like">
                         <span class="material-symbols-rounded">favorite_border</span>
+                    </button>
+                    <button class="icon-btn dl-btn" data-id="${escapeHtml(s.id)}" aria-label="Download">
+                        <span class="material-symbols-rounded">download</span>
                     </button>
                     <button class="icon-btn add-btn" aria-label="Add to playlist">
                         <span class="material-symbols-rounded">playlist_add</span>
@@ -1402,6 +1528,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const heart = card.querySelector('.heart-btn');
             if (heart) heart.addEventListener('click', (e) => { e.stopPropagation(); toggleLike(track, heart); });
+            const dlB = card.querySelector('.dl-btn');
+            if (dlB) dlB.addEventListener('click', (e) => { e.stopPropagation(); downloadSong(track); });
             const addB = card.querySelector('.add-btn');
             if (addB) addB.addEventListener('click', (e) => { e.stopPropagation(); openPicker(track); });
 
@@ -1437,6 +1565,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (AC.mem.has(id)) return AC.mem.get(id);
         const s = state.songs.get(id);
         if (s && s.audioBlob) return s.audioBlob;
+        const dl = state.downloads.get(id);
+        if (dl && dl.blob && dl.blob.size) return dl.blob;
         if (!state.db) return null;
         try { const r = await dbGet('cache', id); if (r && r.blob && r.blob.size) { AC.mem.set(id, r.blob); return r.blob; } } catch (e) {}
         return null;
@@ -1691,7 +1821,8 @@ document.addEventListener('DOMContentLoaded', () => {
         state.shufflePlayed.add(track.id);
 
         const saved = state.songs.get(track.id);
-        const blob = track.audioBlob || (saved && saved.audioBlob);
+        const dlRec = state.downloads.get(track.id);
+        const blob = track.audioBlob || (saved && saved.audioBlob) || (dlRec && dlRec.blob);
 
         if (!track.isLocal && !blob && !navigator.onLine) {
             showToast('You are offline and this song is not downloaded');
@@ -1755,7 +1886,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function playNextTrack() {
         if (!navigator.onLine) {
-            const ok = (t) => t.isLocal || t.audioBlob || (state.songs.get(t.id) || {}).audioBlob;
+            const ok = (t) => t.isLocal || t.audioBlob || (state.songs.get(t.id) || {}).audioBlob || (state.downloads.get(t.id) || {}).blob;
             const pool = (state.radio || state.playlist.length < 2) ? [...state.songs.values()].filter(ok) : state.playlist;
             const cur = state.currentTrack, idx = pool.findIndex(t => cur && t.id === cur.id);
             for (let k = 1; k <= pool.length; k++) {
@@ -2536,6 +2667,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     elements.openFullPlayerBtn.addEventListener('click', () => elements.fullPlayerOverlay.classList.remove('hidden'));
     elements.closePlayerBtn.addEventListener('click', () => elements.fullPlayerOverlay.classList.add('hidden'));
+    $('player-dl-btn').addEventListener('click', () => downloadSong(state.currentTrack));
     elements.wishlistToggleBtn.addEventListener('click', () => toggleLike(state.currentTrack, elements.wishlistToggleBtn));
     $('mini-like-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleLike(state.currentTrack, $('mini-like-btn')); });
     $('mini-prev-btn').addEventListener('click', playPrevTrack);
