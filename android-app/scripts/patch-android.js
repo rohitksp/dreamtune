@@ -2,7 +2,7 @@
 const fs = require('fs'), path = require('path');
 const pkgDir = path.join('android', 'app', 'src', 'main', 'java', 'com', 'rohit', 'dreamtune', 'app');
 fs.mkdirSync(pkgDir, { recursive: true });
-['KeepAliveService.java', 'KeepAlivePlugin.java', 'MainActivity.java', 'PlayerService.java', 'NativePlayer.java', 'YtAudio.java']
+['KeepAliveService.java', 'KeepAlivePlugin.java', 'MainActivity.java', 'PlayerService.java', 'NativePlayer.java', 'YtAudio.java', 'AudioFetch.java']
   .forEach(f => fs.copyFileSync(path.join('native', f), path.join(pkgDir, f)));
 
 // ---- manifest: permissions + services

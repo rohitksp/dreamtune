@@ -69,12 +69,19 @@ final class NativePlayer {
         lastErr = code == null ? "" : code;
         final Meta m = curMeta;
         final PlayerService s = PlayerService.instance;
+        // add what the saved file looks like, so an error message tells us the reason
+        boolean bad = false;
+        if (m != null && s != null) {
+            File cf = new File(new File(s.getCacheDir(), "yt"), m.id + ".m4a");
+            if (cf.exists()) { bad = !AudioFetch.valid(cf); lastErr += " [" + (cf.length() / 1024) + " KB" + (bad ? ", incomplete file" : ", file ok") + "]"; }
+        }
         if (m == null || s == null || s.exo == null || retry >= 2) { giveUp(); return; }
         final int attempt = ++retry, my = token;
+        final boolean redo = bad;
         final long at = Math.max(0, s.exo.getCurrentPosition());
         pool.execute(() -> {
             try {
-                if (attempt == 2) { m.src = null; new File(new File(s.getCacheDir(), "yt"), m.id + ".m4a").delete(); }
+                if (attempt == 2 || redo) { m.src = null; new File(new File(s.getCacheDir(), "yt"), m.id + ".m4a").delete(); }
                 final Uri src = m.src != null ? m.src : resolveSource(s, m, () -> token != my);
                 m.src = src;
                 main.post(() -> { if (token == my) startItem(src, m, at); });

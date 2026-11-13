@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BooleanSupplier;
 
 import okhttp3.OkHttpClient;
@@ -22,6 +23,9 @@ import org.schabi.newpipe.extractor.localization.Localization;
 import org.schabi.newpipe.extractor.stream.AudioStream;
 import org.schabi.newpipe.extractor.stream.DeliveryMethod;
 import org.schabi.newpipe.extractor.stream.StreamInfo;
+import java.util.ArrayList;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Finds the audio link of a YouTube video with NewPipe Extractor (the library behind the NewPipe app)
@@ -76,66 +80,100 @@ public class YtAudio {
         return FF_UA;
     }
 
-    /** direct audio link (m4a preferred) */
-    static String audioUrl(String id) throws Exception {
+    /** direct audio link (m4a preferred). pick = 0 best, 1 next best, ... (used when a download did not work) */
+    static String audioUrl(String id, int pick) throws Exception {
         init();
         StreamInfo info = StreamInfo.getInfo("https://www.youtube.com/watch?v=" + id);
-        AudioStream best = null;
+        ArrayList<AudioStream> list = new ArrayList<>();
         for (AudioStream a : info.getAudioStreams()) {
-            if (a.getDeliveryMethod() != DeliveryMethod.PROGRESSIVE_HTTP) continue;
-            boolean m4a = a.getFormat() == MediaFormat.M4A;
-            boolean bestM4a = best != null && best.getFormat() == MediaFormat.M4A;
-            if (best == null || (m4a && !bestM4a) || (m4a == bestM4a && a.getAverageBitrate() > best.getAverageBitrate())) best = a;
+            if (a.getDeliveryMethod() == DeliveryMethod.PROGRESSIVE_HTTP) list.add(a);
         }
-        if (best == null) throw new Exception("no audio stream found");
-        return best.getContent();
+        if (list.isEmpty()) throw new Exception("no audio stream found");
+        // m4a first, then the higher bitrate
+        list.sort((x, y) -> {
+            boolean mx = x.getFormat() == MediaFormat.M4A, my = y.getFormat() == MediaFormat.M4A;
+            if (mx != my) return mx ? -1 : 1;
+            return Integer.compare(y.getAverageBitrate(), x.getAverageBitrate());
+        });
+        return list.get(Math.min(pick, list.size() - 1)).getContent();
     }
 
+    /** the audio server, asked with OkHttp */
+    static AudioFetch.Source okSource(final String url, final String ua) {
+        final Pattern cr = Pattern.compile("bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)|bytes\\s+\\*/(\\d+)");
+        return (start, end) -> {
+            okhttp3.Request req = new okhttp3.Request.Builder().url(url + "&range=" + start + "-" + end)
+                    .header("User-Agent", ua).header("Range", "bytes=" + start + "-" + end).build();
+            try (okhttp3.Response r = http.newCall(req).execute()) {
+                AudioFetch.Part p = new AudioFetch.Part();
+                p.code = r.code();
+                String h = r.header("Content-Range");
+                if (h != null) {
+                    Matcher m = cr.matcher(h);
+                    if (m.find()) {
+                        if (m.group(1) != null) {
+                            p.from = Long.parseLong(m.group(1));
+                            if (!"*".equals(m.group(3))) p.total = Long.parseLong(m.group(3));
+                        } else if (m.group(4) != null) {
+                            p.total = Long.parseLong(m.group(4));
+                        }
+                    }
+                }
+                if (p.code == 200 || p.code == 206) p.data = r.body() != null ? r.body().bytes() : new byte[0];
+                return p;
+            }
+        };
+    }
+
+    private static final ConcurrentHashMap<String, Object> LOCKS = new ConcurrentHashMap<>();
+
+    /**
+     * The audio file of a song, downloaded and CHECKED. Only a complete file is ever returned or kept.
+     * One download per song at a time (the "next song" preloader and the player used to write the same file together).
+     */
     static File ensureFile(Context c, String id, BooleanSupplier cancelled) throws Exception {
         File dir = new File(c.getCacheDir(), "yt");
         if (!dir.exists()) dir.mkdirs();
         File f = new File(dir, id + ".m4a");
-        if (f.exists() && f.length() > 0) { f.setLastModified(System.currentTimeMillis()); return f; }
 
-        String url = audioUrl(id);
-        String ua = uaFor(url);
-        File tmp = new File(dir, id + ".part");
-        long start = 0, total = -1;
-        String clen = Uri.parse(url).getQueryParameter("clen");
-        if (clen != null) { try { total = Long.parseLong(clen); } catch (Exception e) { } }
+        Object lock = LOCKS.computeIfAbsent(id, k -> new Object());
+        synchronized (lock) {
+            if (f.exists()) {
+                if (AudioFetch.valid(f)) { f.setLastModified(System.currentTimeMillis()); return f; }
+                f.delete();                                   // a half-saved file from an earlier version: download it again
+            }
 
-        try (FileOutputStream out = new FileOutputStream(tmp)) {
-            while (total < 0 || start < total) {
+            Exception last = null;
+            for (int attempt = 0; attempt < 3; attempt++) {
                 if (cancelled != null && cancelled.getAsBoolean()) throw new Exception("cancelled");
-                long end = start + CHUNK - 1;
-                okhttp3.Request req = new okhttp3.Request.Builder().url(url + "&range=" + start + "-" + end)
-                        .header("User-Agent", ua).header("Range", "bytes=" + start + "-" + end).build();
-                try (okhttp3.Response r = http.newCall(req).execute()) {
-                    if (r.code() != 200 && r.code() != 206) throw new IOException("audio server HTTP " + r.code());
-                    String cr = r.header("Content-Range");
-                    if (cr != null && cr.contains("/")) {
-                        try { total = Long.parseLong(cr.substring(cr.indexOf('/') + 1).trim()); } catch (Exception e) { }
-                    }
-                    byte[] data = r.body() != null ? r.body().bytes() : new byte[0];
-                    if (data.length == 0) throw new IOException("empty chunk");
-                    out.write(data);
-                    start += data.length;
-                    if (total < 0 && data.length < CHUNK) total = start;
-                    if (data.length > CHUNK) total = start;        // server ignored the range and sent everything
+                File tmp = new File(dir, id + "." + attempt + ".part");
+                try {
+                    String url = audioUrl(id, attempt == 2 ? 1 : 0);        // last try: the next best stream
+                    String ua = uaFor(url);
+                    long total = -1;
+                    String clen = Uri.parse(url).getQueryParameter("clen");
+                    if (clen != null) { try { total = Long.parseLong(clen); } catch (Exception e) { } }
+                    // 1st try: 1 MB pieces. 2nd and 3rd try: one single big request
+                    long chunk = attempt == 0 ? CHUNK : 64L * 1024 * 1024;
+                    AudioFetch.download(tmp, okSource(url, ua), total, chunk, cancelled);
+                    if (!tmp.renameTo(f)) throw new IOException("could not save the audio file");
+                    trim(dir);
+                    return f;
+                } catch (Exception e) {
+                    last = e;
+                    tmp.delete();
+                    if ("cancelled".equals(e.getMessage())) throw e;
                 }
             }
-        } catch (Exception e) {
-            tmp.delete();
-            throw e;
+            throw last != null ? last : new IOException("download failed");
         }
-        if (!tmp.renameTo(f)) { tmp.delete(); throw new IOException("could not save the audio file"); }
-        trim(dir);
-        return f;
     }
 
     private static void trim(File dir) {
         try {
             File[] fs = dir.listFiles((d, n) -> n.endsWith(".m4a"));
+            File[] parts = dir.listFiles((d, n) -> n.endsWith(".part"));
+            if (parts != null) for (File p : parts) if (System.currentTimeMillis() - p.lastModified() > 10 * 60 * 1000) p.delete();
             if (fs == null || fs.length <= KEEP_FILES) return;
             java.util.Arrays.sort(fs, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
             for (int i = 0; i < fs.length - KEEP_FILES; i++) fs[i].delete();
