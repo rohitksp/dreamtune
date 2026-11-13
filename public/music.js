@@ -1452,7 +1452,81 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     async function acDelete(id) { AC.mem.delete(id); try { await dbDel('cache', id); } catch (e) {} }
 
+    /* ---------------------------------------------------------------------
+       Android app only: get the song on the phone itself (like Vidmate / Snaptube)
+       The phone asks YouTube from its own connection, downloads the audio, and the app plays it
+       with a normal audio player. A background service keeps it alive when the screen is off.
+       --------------------------------------------------------------------- */
+    var IS_NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+    function nat(plugin, method, opts) { return window.Capacitor.nativePromise(plugin, method, opts || {}); }
+    var NCLIENTS = [
+        { cn: '28', cv: '1.60.19', ua: 'com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+          ctx: { clientName: 'ANDROID_VR', clientVersion: '1.60.19', deviceMake: 'Oculus', deviceModel: 'Quest 3', androidSdkVersion: 32, osName: 'Android', osVersion: '12L', hl: 'en', gl: 'IN' } },
+        { cn: '5', cv: '20.10.4', ua: 'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)',
+          ctx: { clientName: 'IOS', clientVersion: '20.10.4', deviceMake: 'Apple', deviceModel: 'iPhone16,2', osName: 'iPhone', osVersion: '18.3.2.22D82', hl: 'en', gl: 'IN' } }
+    ];
+    var nLinks = new Map();
+    function b64ToU8(b) { const bin = atob(b), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+
+    async function nativeLink(id) {
+        const hit = nLinks.get(id); if (hit && hit.exp > Date.now()) return hit;
+        let last = 'no audio link';
+        for (const c of NCLIENTS) {
+            try {
+                const r = await nat('CapacitorHttp', 'request', {
+                    url: 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false', method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'User-Agent': c.ua, 'X-YouTube-Client-Name': c.cn, 'X-YouTube-Client-Version': c.cv, 'Origin': 'https://www.youtube.com' },
+                    data: { videoId: id, contentCheckOk: true, racyCheckOk: true, context: { client: c.ctx } }, responseType: 'json'
+                });
+                const d = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
+                const st = d && d.playabilityStatus && d.playabilityStatus.status;
+                if (st && st !== 'OK') { last = 'YouTube says: ' + st; continue; }
+                const fm = ((d.streamingData && d.streamingData.adaptiveFormats) || []).filter(f => f.url && /^audio\/mp4/.test(f.mimeType || '') && Number(f.contentLength) > 0);
+                if (!fm.length) { last = 'no direct audio link'; continue; }
+                const f = fm.find(x => x.itag === 140) || fm.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+                const rec = { url: f.url, total: Number(f.contentLength), ua: c.ua, exp: Date.now() + 10 * 60e3 };
+                nLinks.set(id, rec); return rec;
+            } catch (e) { last = (e && e.message) || String(e); }
+        }
+        throw new Error(last);
+    }
+
+    async function fetchAudioNative(id) {
+        const SIZE = 1024 * 1024, parts = [];
+        let link = await nativeLink(id), start = 0;
+        if (link.total > 40 * 1024 * 1024) { AC.noStream.add(id); const e = new Error('too long'); e.tooLong = true; throw e; }
+        while (start < link.total) {
+            if (!AC.want.has(id) && !AC.keep.has(id)) throw new Error('cancelled');      // you skipped away
+            const end = Math.min(start + SIZE, link.total) - 1;
+            let u8 = null;
+            for (let tr = 0; tr < 2 && !u8; tr++) {
+                const r = await nat('CapacitorHttp', 'request', { url: `${link.url}&range=${start}-${end}`, method: 'GET', headers: { 'User-Agent': link.ua, 'Range': `bytes=${start}-${end}` }, responseType: 'arraybuffer' });
+                if (r.status === 200 || r.status === 206) u8 = b64ToU8(r.data);
+                else { nLinks.delete(id); if (tr === 1) throw new Error('audio server HTTP ' + r.status); link = await nativeLink(id); }
+            }
+            if (u8.length > end - start + 1) u8 = u8.subarray(0, end - start + 1);
+            if (!u8.length) throw new Error('empty chunk');
+            parts.push(u8); start += u8.length;
+        }
+        return new Blob(parts, { type: 'audio/mp4' });
+    }
+
+    var kaOn = false, kaKey = '', kaTimer = null, kaAsked = false;
+    function nativeKeep(playing) {      // foreground service = Android keeps the app and the music alive with the screen off
+        if (!IS_NATIVE) return;
+        clearTimeout(kaTimer);
+        const t = state.currentTrack, key = t ? t.id : '';
+        if (playing) {
+            if (kaOn && kaKey === key) return;
+            if (!kaAsked) { kaAsked = true; nat('KeepAlive', 'askNotifications').catch(() => {}).then(() => nat('KeepAlive', 'batteryExempt')).catch(() => {}); }
+            nat('KeepAlive', 'start', { title: t ? cleanTitle(t.title) : 'DreamTune', text: t ? t.artist : 'Playing' }).then(() => { kaOn = true; kaKey = key; }).catch(() => {});
+        } else if (kaOn) {
+            kaTimer = setTimeout(() => { nat('KeepAlive', 'stop').catch(() => {}); kaOn = false; }, 30000);
+        }
+    }
+
     async function fetchAudio(id) {
+        if (IS_NATIVE) { try { return await fetchAudioNative(id); } catch (e) { if (e.message === 'cancelled' || e.tooLong) throw e; console.warn('on-phone download failed:', e.message); } }
         const SIZE = 3 * 1024 * 1024, parts = [];
         let start = 0, total = 0, mime = 'audio/mp4';
         for (let n = 0; n < 24; n++) {
@@ -1838,6 +1912,7 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.fullPlayerOverlay.classList.toggle('playing', state.isPlaying);
         elements.app.classList.toggle('is-playing', state.isPlaying);
         keepAlive(state.isPlaying && state.engine === 'yt');
+        nativeKeep(state.isPlaying);
     }
 
     function setupMediaSession(track) {
