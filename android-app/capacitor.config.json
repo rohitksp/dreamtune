@@ -1,0 +1,12 @@
+{
+  "appId": "com.rohit.dreamtune.app",
+  "appName": "DreamTune",
+  "webDir": "www",
+  "server": {
+    "url": "https://dreamtune7.netlify.app",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}
