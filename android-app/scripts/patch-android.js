@@ -10,7 +10,7 @@ const perms = [
   'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK', 'android.permission.WAKE_LOCK',
   'android.permission.POST_NOTIFICATIONS', 'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'
 ].filter(p => !x.includes(p)).map(p => '    <uses-permission android:name="' + p + '" />').join('\n');
-x = x.replace('<application', perms + '\n    <application');
+x = x.replace('<application', perms + '\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />\n    <application');
 x = x.replace('</application>', '    <service android:name=".KeepAliveService" android:exported="false" android:foregroundServiceType="mediaPlayback" />\n    </application>');
 fs.writeFileSync(mf, x);
 console.log('patched android project');
