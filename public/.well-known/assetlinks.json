@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.rohit.dreamtune",
+        "sha256_cert_fingerprints": ["FB:84:72:4B:79:F3:D3:A4:43:8F:21:BB:C1:CB:C7:8E:62:90:4B:C4:BF:CE:D3:61:68:79:7C:EE:60:83:6B:77"]
+      }
+    }]
