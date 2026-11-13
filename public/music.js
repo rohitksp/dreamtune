@@ -102,6 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
         openPlaylistId: null,
         downloading: new Set(),
         downloads: new Map(),
+        dlBusy: new Set(),
         localTracks: [],
         objectUrl: null,
         resumeAt: 0, prefs: null, radio: false, queue: [], history: [], taste: {}, recentMoods: [], speed: 1, qTab: 'next', source: '', similar: null
@@ -205,6 +206,29 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.toast.classList.remove('hidden');
         clearTimeout(toastTimer);
         toastTimer = setTimeout(() => elements.toast.classList.add('hidden'), ms);
+    }
+
+    // cover for song LISTS: tries the normal picture, then a bigger one; if the song has no real cover, the row is removed
+    const COVER_OK = new Map();
+    function setCover(img, src, host, onFail) {
+        const urls = [src]; const m = /\/vi\/([\w-]{11})\//.exec(src || '');
+        if (m) urls.push(`https://i.ytimg.com/vi/${m[1]}/hqdefault.jpg`);
+        const done = (u) => {
+            COVER_OK.set(src, u);
+            if (u) { img.src = u; return; }
+            if (onFail) onFail();
+            if (host && host.isConnected) host.remove(); else img.src = PLACEHOLDER;
+        };
+        if (!src) { done(null); return; }
+        if (COVER_OK.has(src)) { done(COVER_OK.get(src)); return; }
+        const run = (i) => {
+            if (i >= urls.length) { done(null); return; }
+            const im = new Image();
+            im.onload = () => { if (im.naturalWidth > 120) done(urls[i]); else run(i + 1); };   // 120px wide = YouTube's grey "no picture" image
+            im.onerror = () => run(i + 1);
+            im.src = urls[i];
+        };
+        run(0);
     }
 
     function setImg(img, src) {
@@ -907,10 +931,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!track || track.isLocal) { showToast('Phone songs are already on your device'); return; }
         if (!state.db) { showToast('Please wait - library is loading'); return; }
         if (state.downloads.has(track.id)) { showToast('Already downloaded'); return; }
-        if (state.downloading.has(track.id)) { showToast('Download in progress...'); return; }
+        if (state.dlBusy.has(track.id)) { showToast('Download in progress...'); return; }
         if (!navigator.onLine) { showToast('Connect to the internet to download'); return; }
         if (!isYTid(track.id)) { showToast('This song cannot be downloaded'); return; }
-        state.downloading.add(track.id); updateDownloadButtons();
+        state.dlBusy.add(track.id); updateDownloadButtons();
         showToast('Downloading "' + cleanTitle(track.title) + '"...', 2500);
         try {
             let blob = null, onPhone = false, uri = '';
@@ -936,7 +960,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast('Download failed - check your internet and try again', 4000);
         } finally {
             AC.keep.delete(track.id);
-            state.downloading.delete(track.id); updateDownloadButtons();
+            state.dlBusy.delete(track.id); updateDownloadButtons();
         }
     }
 
@@ -949,7 +973,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateDownloadButtons() {
         document.querySelectorAll('.dl-btn').forEach(b => {
             const id = b.dataset.id || (state.currentTrack && state.currentTrack.id);
-            const done = state.downloads.has(id), busy = state.downloading.has(id);
+            const done = state.downloads.has(id), busy = state.dlBusy.has(id);
             const sp = b.querySelector('span');
             sp.textContent = done ? 'download_done' : (busy ? 'progress_activity' : 'download');
             sp.classList.toggle('spin', busy);
@@ -1529,10 +1553,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const i = Number(card.dataset.index);
             if (i < start) return;
             const track = songs[i];
-            setImg(card.querySelector('.song-thumb'), track.thumb);
+            if (opts.heart) setCover(card.querySelector('.song-thumb'), track.thumb, card, () => { track._noCover = true; });
+            else setImg(card.querySelector('.song-thumb'), track.thumb);
             card.querySelector('.song-info').addEventListener('click', () => {
                 if (opts.queue) playQueued(track, opts.queue);
-                else playTrack(track, songs, { radio: !!opts.heart, mood: opts.mood || (activeFeed && activeFeed.mood) || null, upnext: afterTrack(songs, track) });
+                else { const live = songs.filter(t => !t._noCover); playTrack(track, live, { radio: !!opts.heart, mood: opts.mood || (activeFeed && activeFeed.mood) || null, upnext: afterTrack(live, track) }); }
             });
 
             const heart = card.querySelector('.heart-btn');
@@ -1856,7 +1881,7 @@ document.addEventListener('DOMContentLoaded', () => {
             NP.cmdSeq = r.cmdSeq;
             if (r.cmd === 'next') { playNextTrack(); return; }
             if (r.cmd === 'prev') { playPrevTrack(); return; }
-            if (r.cmd === 'error' && state.currentTrack) { showToast('This song cannot be played - skipping'); setTimeout(() => { if (state.engine === 'native') playNextTrack(); }, 1200); return; }
+            if (r.cmd === 'error' && state.currentTrack) { showToast('This song cannot be played' + (r.err ? ' (' + r.err + ')' : '') + ' - skipping'); setTimeout(() => { if (state.engine === 'native') playNextTrack(); }, 1200); return; }
         }
         const cur = state.currentTrack;
         if (!cur || r.id !== cur.id) return;
@@ -2636,7 +2661,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body.innerHTML = items.map((it, i) => `<button class="card" data-i="${i}"><img alt=""><strong class="truncate">${escapeHtml(cleanTitle(it.title))}</strong><small class="truncate">${escapeHtml(it.artist)}${viewsHTML(it.views)}</small></button>`).join('');
                 body.querySelectorAll('.card').forEach((c, i) => hd(c.querySelector('img'), items[i]));
             }
-            body.querySelectorAll('img[data-src]').forEach(im => setImg(im, im.dataset.src));
+            body.querySelectorAll('img[data-src]').forEach(im => setCover(im, im.dataset.src, im.closest('.mini-row')));
             body.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => play(items[+b.dataset.i])));
             const pa = el.querySelector('.play-all');
             if (pa) pa.addEventListener('click', () => { setShuffle(false); playTrack(items[0], items, {}); });
@@ -2693,13 +2718,13 @@ document.addEventListener('DOMContentLoaded', () => {
         cx.setTransform(d, 0, 0, d, 0, 0); cx.clearRect(0, 0, s, s);
         amp += ((state.isPlaying && !reduceMotion ? 1 : 0.15) - amp) * 0.05;
         wt += 0.016 * (state.isPlaying ? 1 : 0.25);
-        const beat = 0.5 + 0.5 * Math.sin(wt * 5), R = s * 0.375, c = s / 2;
+        const beat = 0.5 + 0.5 * Math.sin(wt * 5), R = s * 0.415, c = s / 2;
         [waveCols[0], waveCols[1], '#ffffff'].forEach((col, k) => {
             cx.beginPath();
             for (let a = 0; a <= 360; a += 3) {
                 const r = a * Math.PI / 180;
                 const w = Math.sin(r * (5 + k * 2) + wt * (2 + k) * (k % 2 ? -1 : 1)) * 0.6 + Math.sin(r * (9 - k) - wt * 1.7) * 0.4;
-                const rad = R + s * 0.02 * k + w * s * 0.03 * amp * (1 + beat * 0.5);
+                const rad = R + s * 0.016 * k + w * s * 0.024 * amp * (1 + beat * 0.5);
                 const x = c + Math.cos(r) * rad, y = c + Math.sin(r) * rad;
                 a ? cx.lineTo(x, y) : cx.moveTo(x, y);
             }

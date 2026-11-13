@@ -1276,3 +1276,52 @@ html { font-size: 14.5px; }
 /* download button */
 .player-header-right { display: flex; align-items: center; gap: 2px; }
 .dl-btn.active .material-symbols-rounded { color: #34d399; }
+
+/* ==========================================================================
+   v6: compact Library, bigger player art + waves
+   ========================================================================== */
+#wishlist-content .page-hero { padding: 11px 14px; margin-bottom: 12px; border-radius: 18px; gap: 11px; }
+#wishlist-content .hero-icon { width: 40px; height: 40px; border-radius: 12px; }
+#wishlist-content .hero-icon .material-symbols-rounded { font-size: 22px; }
+#wishlist-content .hero-copy h2 { font-size: 1.02rem; }
+#wishlist-content .hero-copy p { font-size: .72rem; margin-top: 1px; }
+#wishlist-content .btn-light { padding: 6px 11px; font-size: .75rem; border-radius: 16px; gap: 3px; }
+#wishlist-content .btn-light .material-symbols-rounded { font-size: 17px; }
+#wishlist-content .liked-card { padding: 10px 12px; gap: 11px; margin-bottom: 8px; border-radius: 18px; box-shadow: 0 10px 24px -14px #5f46b8; }
+#wishlist-content .liked-art { width: 42px; height: 42px; border-radius: 13px; }
+#wishlist-content .liked-art .material-symbols-rounded { font-size: 22px; }
+#wishlist-content .liked-text h3 { font-size: .95rem; }
+#wishlist-content .liked-text p { font-size: .72rem; }
+#wishlist-content .liked-thumbs { padding-left: 10px; }
+#wishlist-content .liked-thumbs img { width: 30px; height: 30px; border-radius: 8px; margin-left: -10px; border-width: 1.5px; }
+#wishlist-content .section-heading { font-size: .9rem; margin: 12px 0 9px; gap: 6px; }
+#wishlist-content .section-heading .material-symbols-rounded { font-size: 18px; }
+#wishlist-content .pl-grid { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+#wishlist-content .pl-cover { border-radius: 14px; }
+#wishlist-content .pl-cover-icon { font-size: 30px; }
+#wishlist-content .tile-del { width: 24px; height: 24px; top: 5px; right: 5px; }
+#wishlist-content .tile-del .material-symbols-rounded { font-size: 15px; }
+#wishlist-content .pl-tile-name { font-size: .78rem; margin-top: 6px; }
+#wishlist-content .pl-tile-count { font-size: .66rem; }
+#wishlist-content .pl-hero { padding: 9px 12px 12px; border-radius: 18px; margin-bottom: 12px; }
+#wishlist-content .pl-hero-body { gap: 11px; margin-top: 2px; }
+#wishlist-content .pl-hero-cover { width: 64px; height: 64px; border-radius: 14px; }
+#wishlist-content .pl-hero-cover .material-symbols-rounded { font-size: 30px; }
+#wishlist-content .pl-hero-label { font-size: .6rem; }
+#wishlist-content .pl-hero-text h2 { font-size: 1.1rem; }
+#wishlist-content .pl-hero-count { font-size: .72rem; margin-top: 2px; }
+#wishlist-content .pl-hero-actions { margin-top: 10px; gap: 8px; }
+#wishlist-content .pl-hero-actions button { padding: 7px 14px; font-size: .78rem; }
+#wishlist-content .pl-hero-actions .material-symbols-rounded { font-size: 18px; }
+#wishlist-content .pl-hero .icon-btn { width: 32px; height: 32px; }
+#wishlist-content .song-card { padding: 6px 8px; }
+#wishlist-content .song-card .thumb-wrap, #wishlist-content .song-thumb { width: 38px; height: 38px; }
+#wishlist-content .song-title { font-size: .82rem; }
+#wishlist-content .song-artist { font-size: .68rem; margin-top: 1px; }
+.song-actions .icon-btn { width: 34px; height: 34px; }
+.song-actions .icon-btn .material-symbols-rounded { font-size: 20px; }
+
+/* bigger cover + waves in the player (also on phones) */
+.art-stage { width: min(118vw, 640px, 58dvh) !important; margin-left: 50% !important; margin-right: 0 !important; transform: translateX(-50%); }
+.art-disc { inset: 12% !important; }
+@media (min-width: 900px) { .art-stage { width: min(50vw, 720px, 76vh) !important; margin: 0 auto !important; transform: none; } }
