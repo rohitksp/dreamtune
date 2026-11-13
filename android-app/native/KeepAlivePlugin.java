@@ -16,6 +16,7 @@ import android.util.Base64;
 import com.getcapacitor.JSObject;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileInputStream;
 import java.io.OutputStream;
 
 import com.getcapacitor.PermissionState;
@@ -165,6 +166,102 @@ public class KeepAlivePlugin extends Plugin {
         } catch (Exception e) {
             abortSave();
             call.reject(String.valueOf(e.getMessage()));
+        }
+    }
+
+    /* ---------- native player controls (ExoPlayer in PlayerService) ---------- */
+    private static NativePlayer.Meta meta(PluginCall call) {
+        NativePlayer.Meta m = new NativePlayer.Meta();
+        m.id = call.getString("id", "");
+        m.uri = call.getString("uri", "");
+        m.title = call.getString("title", "DreamTune");
+        m.artist = call.getString("artist", "");
+        m.thumb = call.getString("thumb", "");
+        return m;
+    }
+
+    @PluginMethod
+    public void nPlay(final PluginCall call) {
+        NativePlayer.Meta m = meta(call);
+        if (m.id.isEmpty()) { call.reject("no id"); return; }
+        NativePlayer.play(getContext(), m, (ok, err) -> { if (ok) call.resolve(); else call.reject(err); });
+    }
+
+    @PluginMethod public void nSetNext(PluginCall call) { NativePlayer.setNext(getContext(), meta(call)); call.resolve(); }
+    @PluginMethod public void nPause(PluginCall call) { NativePlayer.withPlayer(p -> p.pause()); call.resolve(); }
+    @PluginMethod public void nResume(PluginCall call) { NativePlayer.withPlayer(p -> p.play()); call.resolve(); }
+    @PluginMethod public void nStop(PluginCall call) { NativePlayer.stop(); call.resolve(); }
+
+    @PluginMethod
+    public void nSeek(PluginCall call) {
+        final long ms = (long) (call.getDouble("ms", 0.0) + 0.5);
+        NativePlayer.withPlayer(p -> p.seekTo(ms));
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void nSpeed(PluginCall call) {
+        Double v = call.getDouble("speed", 1.0);
+        NativePlayer.speed(v == null ? 1f : v.floatValue());
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void nVolume(PluginCall call) {
+        Double v = call.getDouble("v", 1.0);
+        final float f = v == null ? 1f : v.floatValue();
+        NativePlayer.withPlayer(p -> p.setVolume(f));
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void nState(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("id", NativePlayer.curId);
+        r.put("playing", NativePlayer.playing);
+        r.put("st", NativePlayer.st);
+        r.put("pos", NativePlayer.pos);
+        r.put("dur", NativePlayer.dur);
+        r.put("advSeq", NativePlayer.advSeq);
+        r.put("cmdSeq", NativePlayer.cmdSeq);
+        r.put("cmd", NativePlayer.cmd);
+        call.resolve(r);
+    }
+
+    /** download a song (audio file) and put a copy into the phone's Music/DreamTune folder */
+    @PluginMethod
+    public void nDownload(final PluginCall call) {
+        final NativePlayer.Meta m = meta(call);
+        NativePlayer.pool.execute(() -> {
+            try {
+                File f = YtAudio.ensureFile(getContext(), m.id, null);
+                String name = m.title.replaceAll("[\\\\/:*?\"<>|]", " ").trim();
+                if (m.artist != null && !m.artist.isEmpty()) name += " - " + m.artist.replaceAll("[\\\\/:*?\"<>|]", " ").trim();
+                if (name.length() > 90) name = name.substring(0, 90);
+                String uri = copyToMusic(f, name + ".m4a", m.title, m.artist);
+                JSObject r = new JSObject();
+                r.put("uri", uri);
+                call.resolve(r);
+            } catch (Exception e) {
+                call.reject(String.valueOf(e.getMessage()));
+            }
+        });
+    }
+
+    private synchronized String copyToMusic(File src, String name, String title, String artist) throws Exception {
+        try {
+            openSave(name, "audio/mp4", title, artist);
+            try (FileInputStream in = new FileInputStream(src)) {
+                byte[] buf = new byte[64 * 1024];
+                int n;
+                while ((n = in.read(buf)) > 0) saveOut.write(buf, 0, n);
+            }
+            String uri = saveUri != null ? saveUri.toString() : Uri.fromFile(saveFile).toString();
+            finishSave();
+            return uri;
+        } catch (Exception e) {
+            abortSave();
+            throw e;
         }
     }
 }
