@@ -14,6 +14,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const AUTH_DOMAIN = 'streampulse.app';           // User ID -> "userid@streampulse.app" (never receives mail)
     // ---------------------------------------------------------------------
 
+    // Not signed in? The app works anyway with a private guest library kept on this device.
+    const GUEST = { uid: 'guest', name: 'Guest', userId: 'guest', guest: true };
+
     const PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
         "<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'>" +
         "<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#6d28d9'/><stop offset='1' stop-color='#5b21b6'/></linearGradient></defs>" +
@@ -120,6 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
         registerName: $('register-name'), registerUserId: $('register-userid'),
         registerPassword: $('register-password'), registerError: $('register-error'), registerBtn: $('register-btn'),
         goRegister: $('go-register'), goLogin: $('go-login'), configWarning: $('config-warning'),
+        authClose: $('auth-close'), guestBox: $('guest-box'), signinBtn: $('signin-btn'),
         avatarBtn: $('avatar-btn'), drawer: $('side-drawer'), drawerBackdrop: $('drawer-backdrop'),
         closeDrawerBtn: $('close-drawer-btn'), drawerAvatar: $('drawer-avatar'),
         drawerName: $('drawer-name'), drawerUserId: $('drawer-userid'),
@@ -324,6 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.splash.classList.add('hidden');
         elements.app.classList.add('hidden');
         elements.authScreen.classList.remove('hidden');
+        elements.authClose.classList.toggle('hidden', !state.user);      // the app is already running: allow going back
         elements.loginForm.classList.toggle('hidden', view !== 'login');
         elements.registerForm.classList.toggle('hidden', view !== 'register');
         elements.loginError.classList.add('hidden');
@@ -346,6 +351,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showFormError(el, msg) { el.textContent = msg; el.classList.remove('hidden'); }
 
+    // leave the sign-in screen and go back to the app (login is optional)
+    function closeAuth() {
+        elements.authScreen.classList.add('hidden');
+        if (state.user) elements.app.classList.remove('hidden');
+        else startGuest();
+    }
+    elements.authClose.addEventListener('click', closeAuth);
+    document.querySelectorAll('.skip-auth').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); closeAuth(); }));
+    elements.signinBtn.addEventListener('click', () => { closeDrawer(); showAuth('login'); });
     elements.goRegister.addEventListener('click', (e) => { e.preventDefault(); showAuth('register'); });
     elements.goLogin.addEventListener('click', (e) => { e.preventDefault(); showAuth('login'); });
 
@@ -403,16 +417,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     createdAt: Date.now(), updatedAt: Date.now()
                 });
             } catch (dbErr) { console.warn('Could not save profile document (check Firestore rules):', dbErr); }
-            await auth.signOut();
 
-            // go to the login page
+            // signed in already: go straight to the app (guest playlists are moved into the new account)
             elements.registerForm.reset();
-            showAuth('login');
-            elements.loginUserId.value = userId;
-            elements.loginPassword.value = '';
-            elements.loginNotice.textContent = 'Account created! Please log in with your User ID and password.';
-            elements.loginNotice.classList.remove('hidden');
-            elements.loginPassword.focus();
+            registering = false;
+            await switchTo({ uid: cred.user.uid, name, userId });
         } catch (err) {
             console.error(err);
             showFormError(elements.registerError, authErrorMessage(err));
@@ -431,20 +440,65 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderUserUI() {
-        const u = state.user;
-        const bg = gradientFor(u.userId);
-        [elements.avatarBtn, elements.drawerAvatar].forEach(el => { el.textContent = initials(u.name); el.style.background = bg; });
-        elements.drawerName.textContent = u.name;
-        elements.drawerUserId.textContent = '@' + u.userId;
+        const u = state.user, guest = !!u.guest;
+        const bg = guest ? 'linear-gradient(135deg, #6a49b8, #6a6fc9)' : gradientFor(u.userId);
+        [elements.avatarBtn, elements.drawerAvatar].forEach(el => {
+            if (guest) el.innerHTML = '<span class="material-symbols-rounded">person</span>'; else el.textContent = initials(u.name);
+            el.style.background = bg;
+        });
+        elements.drawerName.textContent = guest ? 'Guest' : u.name;
+        elements.drawerUserId.textContent = guest ? 'Not signed in' : '@' + u.userId;
+        elements.guestBox.classList.toggle('hidden', !guest);
+        elements.logoutBtn.classList.toggle('hidden', guest);
         renderGreeting();
     }
 
     function renderGreeting() {}
 
-    async function startSession(user) {
+    const skippedOb = () => { try { return !!localStorage.getItem('sp_ob_skip_' + (state.user ? state.user.uid : '')); } catch (e) { return false; } };
+
+    // copy the guest's taste / order settings into a brand-new account (only where the account has none yet)
+    function copyGuestSettings(uid) {
+        ['sp_prefs_', 'sp_taste_', 'sp_recent_', 'sp_order_', 'sp_hidden_'].forEach(k => {
+            try {
+                const v = localStorage.getItem(k + 'guest');
+                if (v && !localStorage.getItem(k + uid)) localStorage.setItem(k + uid, v);
+            } catch (e) {}
+        });
+    }
+
+    // copy the guest's playlists, liked songs and downloads into the account's database (nothing is lost)
+    async function mergeGuestLibrary() {
+        try {
+            const names = indexedDB.databases ? (await indexedDB.databases()).map(d => d.name) : ['StreamPulseDB_guest'];
+            if (!names.includes('StreamPulseDB_guest')) return 0;
+            const g = await openDatabase('StreamPulseDB_guest');
+            const all = (st) => new Promise((res) => { try { const r = g.transaction([st], 'readonly').objectStore(st).getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => res([]); } catch (e) { res([]); } });
+            const [pls, songs, dls] = await Promise.all([all('playlists'), all('songs'), all('downloads')]);
+            g.close();
+            let moved = 0;
+            const have = new Map((await dbAll('playlists')).map(p => [p.id, p]));
+            for (const p of pls) {
+                const cur = have.get(p.id);
+                if (!cur) { await dbPut('playlists', p); moved++; }
+                else {
+                    const ids = [...new Set([...(cur.songIds || []), ...(p.songIds || [])])];
+                    if (ids.length !== (cur.songIds || []).length) { cur.songIds = ids; cur.updatedAt = Date.now(); await dbPut('playlists', cur); moved++; }
+                }
+            }
+            const haveS = new Set((await dbAll('songs')).map(x => x.id));
+            for (const x of songs) if (!haveS.has(x.id)) await dbPut('songs', x);
+            const haveD = new Set((await dbAll('downloads')).map(x => x.id));
+            for (const x of dls) if (!haveD.has(x.id)) await dbPut('downloads', x);
+            return moved + dls.length;
+        } catch (e) { console.warn('Could not move guest library:', e); return 0; }
+    }
+
+    async function startSession(user, fromGuest) {
         if (state.user && state.user.uid === user.uid) return;
         state.user = user;
-        try { localStorage.setItem('sp_session', JSON.stringify(user)); } catch (e) {}
+        if (!user.guest) { try { localStorage.setItem('sp_session', JSON.stringify(user)); } catch (e) {} }
+        if (fromGuest && !user.guest) copyGuestSettings(user.uid);
 
         renderUserUI();
         loadTaste(); loadPrefs();
@@ -452,14 +506,16 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.authScreen.classList.add('hidden');
         elements.app.classList.remove('hidden');
         setView('home-view');
-        setSyncStatus(fs ? 'Checking your account...' : 'Cloud sync is off', fs ? 'cloud_sync' : 'cloud_off');
+        if (user.guest) setSyncStatus('Sign in to back up your playlists', 'cloud_off');
+        else setSyncStatus(fs ? 'Checking your account...' : 'Cloud sync is off', fs ? 'cloud_sync' : 'cloud_off');
 
         goHome();
         if (!navigator.onLine) setView('wishlist-view');
-        if (!state.prefs) setTimeout(() => { if (!state.prefs) showOnboarding(); }, 1200);
+        if (!state.prefs && !skippedOb()) setTimeout(() => { if (!state.prefs && state.user === user && !skippedOb()) showOnboarding(); }, 1200);
 
         try {
             state.db = await openDatabase('StreamPulseDB_' + user.uid);
+            if (fromGuest && !user.guest) { const n = await mergeGuestLibrary(); if (n) showToast('Your guest playlists were added to your account', 3500); }
             await refreshLibrary();
         } catch (err) {
             console.error('IndexedDB error:', err);
@@ -504,12 +560,27 @@ document.addEventListener('DOMContentLoaded', () => {
         try { localStorage.removeItem('sp_session'); } catch (e) {}
     }
 
+    // switch from guest (or another account) to a signed-in account
+    async function switchTo(user) {
+        if (state.user && state.user.uid === user.uid) return;
+        const fromGuest = !!(state.user && state.user.guest);
+        if (state.user) resetSession();
+        await startSession(user, fromGuest);
+    }
+
+    // not signed in: open the app with the guest library
+    function startGuest() {
+        if (state.user && state.user.guest) { elements.authScreen.classList.add('hidden'); elements.app.classList.remove('hidden'); return; }
+        if (state.user) resetSession();
+        elements.authScreen.classList.add('hidden');
+        return startSession(GUEST);
+    }
+
     async function logout() {
         try { if (auth) await auth.signOut(); } catch (e) { console.error(e); }
-        if (state.user) resetSession();
         elements.loginPassword.value = '';
         elements.loginNotice.classList.add('hidden');
-        showAuth('login');
+        await startGuest();
     }
     elements.logoutBtn.addEventListener('click', logout);
 
@@ -546,7 +617,7 @@ document.addEventListener('DOMContentLoaded', () => {
             loadYouTubeAPI();
             if (activeFeed === homeFeed && !homeFeed.items.length) loadNextPage(homeFeed);
             syncNow().then(retryMissingDownloads);
-        } else if (!online && state.user) {
+        } else if (!online && state.user && !state.user.guest) {
             setSyncStatus('Offline - will sync when you are back online', 'cloud_off');
         }
     }
@@ -601,7 +672,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.engine !== 'yt') return;
         const ct = state.currentTrack;   // blocked / broken in the YouTube player: try the download-first player once
         if (ct && !ct._streamTried && STREAM.on && Date.now() > STREAM.offUntil && navigator.onLine && isYTid(ct.id)) {
-            ct._streamTried = true; showToast('Switching player...', 1500);
+            ct._streamTried = true;
             stopEngines(); startStreamed(ct, playToken); return;
         }
         state.loading = false;
@@ -718,13 +789,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let pushTimer = null, syncing = false, syncAgain = false;
 
     function schedulePush() {
-        if (!fs || !state.user) return;
+        if (!fs || !state.user || state.user.guest) return;
         clearTimeout(pushTimer);
         pushTimer = setTimeout(syncNow, 700);
     }
 
     async function syncNow() {
-        if (!fs || !state.user || !state.db) return;
+        if (!fs || !state.user || state.user.guest || !state.db) return;
         if (!navigator.onLine) { setSyncStatus('Offline - will sync when you are back online', 'cloud_off'); return; }
         if (syncing) { syncAgain = true; return; }
         syncing = true;
@@ -927,17 +998,39 @@ document.addEventListener('DOMContentLoaded', () => {
         return true;
     }
 
+    // PC / browser: hand the song to the browser as a normal file (goes to your Downloads folder)
+    function audioExt(blob) {
+        const t = String((blob && blob.type) || '').toLowerCase();
+        return /webm/.test(t) ? '.webm' : /mpeg|mp3/.test(t) ? '.mp3' : /ogg|opus/.test(t) ? '.ogg' : '.m4a';
+    }
+    function saveToComputer(blob, track) {
+        try {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = safeName(cleanTitle(track.title) + ' - ' + track.artist) + audioExt(blob);
+            a.rel = 'noopener'; a.style.display = 'none';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 120000);
+            return true;
+        } catch (e) { console.warn('browser save failed:', e); return false; }
+    }
+
     async function downloadSong(track) {
         if (!track || track.isLocal) { showToast('Phone songs are already on your device'); return; }
         if (!state.db) { showToast('Please wait - library is loading'); return; }
-        if (state.downloads.has(track.id)) { showToast('Already downloaded'); return; }
+        if (state.downloads.has(track.id)) {
+            const d = state.downloads.get(track.id);
+            if (!IS_NATIVE && d && d.blob && d.blob.size) { saveToComputer(d.blob, track) ? showToast('Saved to your computer (Downloads folder)', 3000) : showToast('Could not save the file - try again'); return; }
+            showToast('Already downloaded'); return;
+        }
         if (state.dlBusy.has(track.id)) { showToast('Download in progress...'); return; }
         if (!navigator.onLine) { showToast('Connect to the internet to download'); return; }
         if (!isYTid(track.id)) { showToast('This song cannot be downloaded'); return; }
         state.dlBusy.add(track.id); updateDownloadButtons();
         showToast('Downloading "' + cleanTitle(track.title) + '"...', 2500);
         try {
-            let blob = null, onPhone = false, uri = '';
+            let blob = null, onPhone = false, onPC = false, uri = '';
             if (IS_NATIVE && NP.ok) {      // the phone downloads the song itself and puts it in Music/DreamTune
                 try {
                     await nat('KeepAlive', 'askStorage');
@@ -950,14 +1043,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 blob = await ensureAudio(track.id);
                 if (!blob || !blob.size) throw new Error('empty file');
                 try { onPhone = await saveToPhone(blob, track); } catch (e) { console.warn('save to phone failed:', e); }
+                if (!IS_NATIVE && blob) onPC = saveToComputer(blob, track);       // PC: also a real file in your Downloads folder
             }
             await dbPut('downloads', { id: track.id, title: track.title, artist: track.artist, thumb: track.thumb || '', duration: track.duration || '',
                                        views: track.views || 0, blob, uri, size: blob ? blob.size : 0, onPhone, savedAt: Date.now() });
             await refreshLibrary();
-            showToast(onPhone ? 'Downloaded - saved in Music/DreamTune on your phone' : 'Downloaded - find it in Library > Downloads', 3500);
+            showToast(onPhone ? 'Downloaded - saved in Music/DreamTune on your phone' : onPC ? 'Downloaded - saved to your computer (Downloads folder)' : 'Downloaded - find it in Library > Downloads', 3500);
         } catch (err) {
             console.error('Download failed:', err);
-            showToast('Download failed - check your internet and try again', 4000);
+            showToast(navigator.onLine ? 'Could not download this song right now - please try again in a moment' : 'Download failed - check your internet and try again', 4500);
         } finally {
             AC.keep.delete(track.id);
             state.dlBusy.delete(track.id); updateDownloadButtons();
@@ -1193,17 +1287,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="hero-icon"><span class="material-symbols-rounded">library_music</span></div>
                 <div class="hero-copy">
                     <h2>Your Library</h2>
-                    <p>Saved offline and synced to your account</p>
+                    <p>${state.user && state.user.guest ? 'Saved on this device' : 'Saved offline and synced to your account'}</p>
                 </div>
                 <button class="btn-light" id="new-playlist-btn" style="position:relative;z-index:1">
                     <span class="material-symbols-rounded">add</span><span>New</span>
                 </button>
             </div>
+            ${state.user && state.user.guest ? `<div class="guest-note"><span class="material-symbols-rounded">cloud_off</span><p>Your library is saved on this device only. Sign in to keep it safe and use it everywhere.</p><button type="button" id="guest-note-btn" class="pill-btn">Sign in</button></div>` : ''}
             ${likedCard()}
             ${downloadsCard()}
             <h3 class="section-heading"><span class="material-symbols-rounded">library_music</span>Playlists</h3>
             <div id="playlist-grid" class="pl-grid"></div>`;
         $('new-playlist-btn').addEventListener('click', () => openCreatePlaylistModal());
+        if ($('guest-note-btn')) $('guest-note-btn').addEventListener('click', () => showAuth('login'));
         $('downloads-card').addEventListener('click', () => { state.openPlaylistId = DL_ID; renderWishlistView(); elements.contentArea.scrollTop = 0; });
         $('liked-card').addEventListener('click', () => {
             if (!state.playlists.some(p => p.id === LIKED_ID)) { showToast('Tap the heart on any song to like it'); return; }
@@ -1588,6 +1684,7 @@ document.addEventListener('DOMContentLoaded', () => {
        --------------------------------------------------------------------- */
     let playToken = 0, loadWatch = null, prefetchTimer = null;
     const STREAM = { on: true, fails: 0, offUntil: 0, warned: false };
+    try { STREAM.offUntil = Number(localStorage.getItem('sp_stream_off')) || 0; } catch (e) {}
     const AC = { want: new Set(), keep: new Set(), loading: new Map(), mem: new Map(), noStream: new Set() };
     const AC_MAX = 30;                                      // songs kept in the pre-download cache
     const isYTid = (id) => /^[\w-]{11}$/.test(String(id || ''));
@@ -1624,6 +1721,8 @@ document.addEventListener('DOMContentLoaded', () => {
     var IS_NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
     function nat(plugin, method, opts) { return window.Capacitor.nativePromise(plugin, method, opts || {}); }
     var NCLIENTS = [
+        { cn: '28', cv: '1.65.10', ua: 'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+          ctx: { clientName: 'ANDROID_VR', clientVersion: '1.65.10', deviceMake: 'Oculus', deviceModel: 'Quest 3', androidSdkVersion: 32, osName: 'Android', osVersion: '12L', hl: 'en', gl: 'IN' } },
         { cn: '28', cv: '1.60.19', ua: 'com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
           ctx: { clientName: 'ANDROID_VR', clientVersion: '1.60.19', deviceMake: 'Oculus', deviceModel: 'Quest 3', androidSdkVersion: 32, osName: 'Android', osVersion: '12L', hl: 'en', gl: 'IN' } },
         { cn: '5', cv: '20.10.4', ua: 'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)',
@@ -1716,7 +1815,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const dead = err.status === 404 || err.status === 501;
         if (dead || STREAM.fails >= 3) {
             STREAM.offUntil = Date.now() + (dead ? 60 : 10) * 60e3; STREAM.fails = 0;
-            if (!STREAM.warned) { STREAM.warned = true; showToast('Fast audio is not available right now - using the standard player', 4200); }
+            try { localStorage.setItem('sp_stream_off', String(STREAM.offUntil)); } catch (e) {}     // remembered, so the next song / visit goes straight to the normal player (no message)
         }
     }
 
@@ -1761,7 +1860,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ytPlayer.setVolume(state.muted ? 0 : state.volume);
                 ytPlayer.unMute();
                 watchLoad(track, 0);
-            } else { pendingVideoId = track.id; loadYouTubeAPI(); showToast('Loading player...'); }
+            } else { pendingVideoId = track.id; loadYouTubeAPI(); }
         };
         if (now) go(); else setTimeout(go, 200);          // quick skips only load the song you stop on
     }
@@ -2377,6 +2476,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const shelfKey = (s) => s.t.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const orderKey = () => 'sp_order_' + (state.user ? state.user.uid : '');
     const hiddenKey = () => 'sp_hidden_' + (state.user ? state.user.uid : '');
+    // profile panel -> "Arrange sections": the side panel slides away first, then the arrange sheet opens on Home
+    $('arrange-drawer-btn').addEventListener('click', () => {
+        closeDrawer();
+        setView('home-view');
+        setTimeout(openArrange, 320);
+    });
     function rebuildHome() { elements.shelves.innerHTML = ''; buildShelves(); elements.contentArea.scrollTop = 0; }
     function openArrange() {
         const hid = JSON.parse(localStorage.getItem(hiddenKey()) || '[]');
@@ -2462,7 +2567,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function savePrefs() {
         try { localStorage.setItem(prefsKey(), JSON.stringify(state.prefs)); } catch (e) {}
-        if (fs && state.user) fs.collection('users').doc(state.user.uid).set({ prefs: state.prefs }, { merge: true }).catch(() => {});
+        if (fs && state.user && !state.user.guest) fs.collection('users').doc(state.user.uid).set({ prefs: state.prefs }, { merge: true }).catch(() => {});
     }
     function moodQuery(m) {
         const mo = MOODS[m], p = state.prefs, rnd = (a) => a[Math.floor(Math.random() * a.length)];
@@ -2495,7 +2600,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <h2>${st.t}</h2><p>${st.s} Or type your own below.</p>
             <div class="ob-grid">${opts.map(([v, l]) => `<button type="button" class="ob-chip${sel.includes(v) ? ' on' : ''}" data-v="${escapeHtml(v)}">${escapeHtml(noEmoji(l))}</button>`).join('')}${customList.map(v => `<button type="button" class="ob-chip on custom" data-c="${escapeHtml(v)}">${escapeHtml(v)}</button>`).join('')}</div>
             <div class="ob-custom"><input id="ob-custom-in" type="text" maxlength="40" placeholder="${ph}" autocomplete="off"><button type="button" id="ob-custom-add">Add</button></div>
-            <div class="ob-actions">${obStep ? '<button type="button" class="btn-secondary" id="ob-back">Back</button>' : '<span></span>'}
+            <div class="ob-actions">${obStep ? '<button type="button" class="btn-secondary" id="ob-back">Back</button>' : (!state.prefs ? '<button type="button" class="btn-secondary" id="ob-skip">Skip for now</button>' : '<span></span>')}
             <button type="button" class="btn-primary" id="ob-next"${okMin() ? '' : ' disabled'}>${last ? 'Build my music' : 'Next'}</button></div></div>`;
         const next = $('ob-next');
         ob.querySelectorAll('.ob-chip[data-v]').forEach(b => b.addEventListener('click', () => {
@@ -2521,6 +2626,7 @@ document.addEventListener('DOMContentLoaded', () => {
         $('ob-custom-add').addEventListener('click', addCustom);
         $('ob-custom-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addCustom(); } });
         if ($('ob-back')) $('ob-back').addEventListener('click', () => { obStep--; renderOb(); });
+        if ($('ob-skip')) $('ob-skip').addEventListener('click', () => { try { localStorage.setItem('sp_ob_skip_' + state.user.uid, '1'); } catch (e) {} ob.classList.add('hidden'); });
         next.addEventListener('click', () => {
             if (!last) { obStep++; renderOb(); return; }
             const avail = new Set(obSel.langs.flatMap(l => SINGERS[l] || [])), allKnown = new Set(Object.values(SINGERS).flat());
@@ -2605,10 +2711,9 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="spotlight"><div><h2>Your mix</h2><p>Starts with what you love and keeps adapting as you listen.</p>
             <button class="btn-white" id="play-mix"><span class="material-symbols-rounded">play_arrow</span><span>Play mix</span></button></div>
             <div class="spot-disc"></div><div class="spot-art">${'<i></i>'.repeat(26)}</div></div>
-            <div class="arrange-row"><button class="pill-btn" id="arrange-btn"><span class="material-symbols-rounded">swap_vert</span>Arrange sections</button></div>` +
+` +
             shelfList.map((s, i) => `<section class="shelf" data-i="${i}"><div class="shelf-head"><h3>${s.t}</h3>${s.all ? '<button class="pill-btn play-all">Play all</button>' : ''}</div><div class="shelf-body k-${s.k}${s.v ? ' v-' + s.v : ''}">${SK[s.k] || ''}</div></section>`).join('');
         $('play-mix').addEventListener('click', () => startStation(topMood() || (state.prefs && state.prefs.genres[0]) || 'romantic'));
-        $('arrange-btn').addEventListener('click', openArrange);
         elements.shelves.querySelectorAll('.shelf').forEach(el => shelfIO.observe(el));
     }
 
@@ -2806,18 +2911,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (auth) {
         auth.onAuthStateChanged((user) => {
             if (registering) return;
-            if (user) {
-                startSession(userFromFirebase(user));
-            } else {
-                if (state.user) resetSession();
-                showAuth(authView);
-            }
+            if (user) switchTo(userFromFirebase(user));
+            else startGuest();
         });
+        // if Firebase is slow to answer, do not keep you waiting: open the app as a guest
+        setTimeout(() => { if (!state.user) startGuest(); }, 4000);
     } else {
-        // Firebase could not load (for example you are offline). Use the last saved login.
+        // Firebase could not load (for example you are offline). Use the last saved login, otherwise the guest library.
         let cached = null;
         try { cached = JSON.parse(localStorage.getItem('sp_session') || 'null'); } catch (e) {}
         if (cached && cached.uid && !configMissing) startSession(cached);
-        else showAuth('login');
+        else startGuest();
     }
 });

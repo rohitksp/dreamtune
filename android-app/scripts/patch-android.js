@@ -50,4 +50,28 @@ dependencies {
 }
 `;
 fs.writeFileSync(appGradle, ag);
+
+// ---- app icon + splash screen: use the DreamTune logo instead of the default Capacitor one
+const res = path.join('android', 'app', 'src', 'main', 'res');
+const iconsSrc = path.join('icons');
+['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'].forEach(d => {
+    const dir = path.join(res, 'mipmap-' + d);
+    fs.mkdirSync(dir, { recursive: true });
+    ['ic_launcher.png', 'ic_launcher_round.png', 'dt_icon_bg.png', 'dt_icon_fg.png']
+        .forEach(f => fs.copyFileSync(path.join(iconsSrc, 'mipmap-' + d, f), path.join(dir, f)));
+});
+const adaptive = '<?xml version="1.0" encoding="utf-8"?>\n<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n' +
+    '    <background android:drawable="@mipmap/dt_icon_bg"/>\n    <foreground android:drawable="@mipmap/dt_icon_fg"/>\n</adaptive-icon>\n';
+const anyDir = path.join(res, 'mipmap-anydpi-v26');
+fs.mkdirSync(anyDir, { recursive: true });
+fs.writeFileSync(path.join(anyDir, 'ic_launcher.xml'), adaptive);
+fs.writeFileSync(path.join(anyDir, 'ic_launcher_round.xml'), adaptive);
+(function walk(dir) {      // replace every default splash picture
+    fs.readdirSync(dir, { withFileTypes: true }).forEach(e => {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (e.name === 'splash.png') fs.copyFileSync(path.join(iconsSrc, 'splash', /land/.test(dir) ? 'splash-land.png' : 'splash-port.png'), p);
+    });
+})(res);
+
 console.log('patched android project');

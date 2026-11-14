@@ -1325,3 +1325,37 @@ html { font-size: 14.5px; }
 .art-stage { width: min(118vw, 640px, 58dvh) !important; margin-left: 50% !important; margin-right: 0 !important; transform: translateX(-50%); }
 .art-disc { inset: 12% !important; }
 @media (min-width: 900px) { .art-stage { width: min(50vw, 720px, 76vh) !important; margin: 0 auto !important; transform: none; } }
+
+/* ==========================================================================
+   v2 additions: icon font safety, optional sign-in (guest), profile panel
+   ========================================================================== */
+
+/* Icons are fixed-size boxes and stay invisible until the icon font is ready,
+   so the words "history", "search", "play_arrow" ... can never show on screen. */
+.material-symbols-rounded { display: inline-block; width: 1em; height: 1em; line-height: 1; overflow: hidden; white-space: nowrap; flex-shrink: 0; }
+html:not(.icons-ok) .material-symbols-rounded { color: transparent !important; -webkit-text-fill-color: transparent; }
+
+.avatar .material-symbols-rounded { font-size: 1.3em; }
+.avatar.xl .material-symbols-rounded { font-size: 1.15em; }
+
+/* sign-in screen: back button + "continue without an account" */
+.auth-close {
+    position: absolute; z-index: 3; top: calc(env(safe-area-inset-top, 0px) + 14px); right: 14px;
+    width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%;
+    background: rgba(255, 255, 255, .14); border: 1px solid rgba(255, 255, 255, .2); color: var(--text); cursor: pointer;
+}
+.auth-close:hover { background: rgba(255, 255, 255, .24); }
+.auth-skip { margin-top: 10px; }
+.auth-skip a { color: var(--text-2) !important; font-weight: 700 !important; font-size: .85rem; }
+
+/* profile panel for people who are not signed in */
+.guest-box { margin: 16px 16px 0; padding: 16px; border-radius: 18px; background: var(--surface); border: 1px solid var(--border); }
+.guest-box strong { font-size: 1rem; font-weight: 800; color: var(--text); }
+.guest-box p { font-size: .8rem; color: var(--text-2); line-height: 1.45; margin: 4px 0 0; }
+.guest-box .btn-gradient { height: 48px; margin-top: 14px; font-size: .92rem; }
+
+/* note at the top of the Library tab for guests */
+.guest-note { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin: 0 0 14px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); }
+.guest-note > .material-symbols-rounded { color: var(--accent); font-size: 24px; }
+.guest-note p { flex: 1; font-size: .8rem; line-height: 1.4; color: var(--text-2); margin: 0; }
+.guest-note .pill-btn { flex-shrink: 0; }
