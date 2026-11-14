@@ -1417,7 +1417,7 @@ document.addEventListener('DOMContentLoaded', () => {
        Back button / swipe-back: closes what is open, then goes to the previous page.
        On the first page, back says "press back again to exit"; a second quick back leaves the app.
        --------------------------------------------------------------------- */
-    const NAV = { restoring: false, exitTimer: null, ready: false };
+    const NAV = { restoring: false, exitTimer: null, ready: false, exitArmed: 0 };
     const currentViewId = () => { const a = document.querySelector('.view-panel.active, .view.active'); return a ? a.id : 'home-view'; };
     function pushNav() { if (!NAV.ready || NAV.restoring) return; try { history.pushState({ dt: 'v', view: currentViewId() }, ''); } catch (e) {} }
     function closeTopLayer() {      // returns true if something was open and got closed
@@ -1439,10 +1439,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const st = ev.state || {};
             if (closeTopLayer()) { history.pushState({ dt: 'v', view: currentViewId() }, ''); return; }     // keep the page, just close the sheet
             if (st.dt === 'v') { NAV.restoring = true; setView(st.view || 'home-view'); NAV.restoring = false; return; }
-            // we are at the very first entry
-            if (currentViewId() !== 'home-view') { NAV.restoring = true; setView('home-view'); NAV.restoring = false; history.pushState({ dt: 'v', view: 'home-view' }, ''); return; }
+            // we are at the very first entry: this used to let a quick second back-press slip past
+            // JS entirely (nothing left to go back to, so Android just closed the app). Re-arm the
+            // guard synchronously, before anything else, so there is always one more step to pop.
+            history.pushState({ dt: 'root' }, '');
+            const now = Date.now();
+            if (NAV.exitArmed && now - NAV.exitArmed < 2200) {
+                NAV.exitArmed = 0;
+                try { window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.App && Capacitor.Plugins.App.exitApp(); } catch (e) {}
+                return;
+            }
+            NAV.exitArmed = now;
+            if (currentViewId() !== 'home-view') { NAV.restoring = true; setView('home-view'); NAV.restoring = false; }
             showToast('Press back again to exit', 2000);
-            NAV.exitTimer = setTimeout(() => { try { history.pushState({ dt: 'v', view: currentViewId() }, ''); } catch (e) {} }, 2200);   // not pressed again: stay in the app
         });
     }
     setTimeout(initNav, 0);
@@ -1672,7 +1681,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div class="song-details">
                         <span class="song-title truncate">${escapeHtml(cleanTitle(s.title))}</span>
-                        <span class="song-artist truncate">${escapeHtml(s.artist)}${viewsHTML(s.views)}${s.duration ? ' • ' + escapeHtml(s.duration) : ''}${offline ? ' • Offline ✓' : ''}</span>
+                        <span class="song-artist truncate">${[s.duration ? escapeHtml(s.duration) : '', eyeSpan(s.views), escapeHtml(s.artist)].filter(Boolean).join(' • ')}${offline ? ' • Offline ✓' : ''}</span>
                     </div>
                 </div>
                 ${opts.heart ? `
@@ -1808,7 +1817,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (st && st !== 'OK') { last = 'YouTube says: ' + st; continue; }
                 const fm = ((d.streamingData && d.streamingData.adaptiveFormats) || []).filter(f => f.url && /^audio\/mp4/.test(f.mimeType || '') && Number(f.contentLength) > 0);
                 if (!fm.length) { last = 'no direct audio link'; continue; }
-                const f = fm.find(x => x.itag === 140) || fm.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+                const lenSec = Number(d.videoDetails && d.videoDetails.lengthSeconds) || 0;
+                // long songs (over 15 min) easily blow past the file-size limit below at full quality,
+                // so for those take the smallest usable audio instead of the usual 128kbps pick
+                const f = lenSec > 900
+                    ? (fm.filter(x => (x.bitrate || 0) > 20000).sort((a, b) => (a.bitrate || 0) - (b.bitrate || 0))[0] || fm.sort((a, b) => (a.bitrate || 0) - (b.bitrate || 0))[0])
+                    : (fm.find(x => x.itag === 140) || fm.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]);
                 const rec = { url: f.url, total: Number(f.contentLength), ua: c.ua, exp: Date.now() + 10 * 60e3 };
                 nLinks.set(id, rec); return rec;
             } catch (e) { last = (e && e.message) || String(e); }
@@ -1819,7 +1833,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchAudioNative(id) {
         const SIZE = 1024 * 1024, parts = [];
         let link = await nativeLink(id), start = 0;
-        if (link.total > 40 * 1024 * 1024) { AC.noStream.add(id); const e = new Error('too long'); e.tooLong = true; throw e; }
+        if (link.total > 120 * 1024 * 1024) { AC.noStream.add(id); const e = new Error('too long'); e.tooLong = true; throw e; }
         while (start < link.total) {
             if (!AC.want.has(id) && !AC.keep.has(id)) throw new Error('cancelled');      // you skipped away
             const end = Math.min(start + SIZE, link.total) - 1;
@@ -2040,7 +2054,10 @@ document.addEventListener('DOMContentLoaded', () => {
         state.loading = true; updatePlayButtons();
         npAskPerms();
         try {
-            await nat('KeepAlive', 'nPlay', npMeta(track));
+            // a long song can take a while to fetch, but it must never hang forever on "Loading":
+            // if the phone hasn't confirmed playback within 35s, treat it the same as a failure.
+            const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 35000));
+            await Promise.race([nat('KeepAlive', 'nPlay', npMeta(track)), timeout]);
             if (token !== playToken) return;
             NP.fails = 0; applySpeed();
             if (state.resumeAt) { const r = state.resumeAt; state.resumeAt = 0; seekTo(r); }
@@ -2048,6 +2065,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (token !== playToken) return;
             console.warn('native player failed:', e && e.message);
             if (e && e.message === 'cancelled') return;
+            if (e && e.message === 'timeout') nat('KeepAlive', 'nStop').catch(() => {});   // stop it in case it finishes late, after we've already moved to the fallback player
             NP.fails++; if (NP.fails >= 2) NP.ok = false;
             NP.active = false; state.engine = null;
             if (!navigator.onLine) { state.loading = false; updatePlayButtons(); showToast('Could not play this song'); return; }
@@ -2523,8 +2541,11 @@ document.addEventListener('DOMContentLoaded', () => {
     /* ---------------------------------------------------------------------
        Views icon, recent plays (resume), arrange home sections
        --------------------------------------------------------------------- */
+    function eyeSpan(n) {
+        return n ? `<span class="eye"><span class="material-symbols-rounded">visibility</span>${fmtViews(n)}</span>` : '';
+    }
     function viewsHTML(n) {
-        return n ? ` • <span class="eye"><span class="material-symbols-rounded">visibility</span>${fmtViews(n)}</span>` : '';
+        return n ? ` • ${eyeSpan(n)}` : '';
     }
     const recKey = () => 'sp_recent_' + (state.user ? state.user.uid : '');
     const recLoad = () => { try { return JSON.parse(localStorage.getItem(recKey()) || '[]'); } catch (e) { return []; } };
