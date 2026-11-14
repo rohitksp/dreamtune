@@ -35,11 +35,7 @@ public class YtAudio {
     private static final String FF_UA = "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0";
     private static final String IOS_UA = "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)";
     private static final String VR_UA = "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
-    private static final long CHUNK = 1L * 1024 * 1024;          // normal pieces (the same size the website route always used)
-    private static final long BIG_CHUNK = 3L * 1024 * 1024;      // 2nd try: bigger pieces, but never so big that the phone runs out of memory
-
-    /** progress of a download: bytes saved so far / total bytes (total = -1 when unknown) */
-    interface Progress { void on(long done, long total); }
+    private static final long CHUNK = 1024 * 1024;
     private static final int KEEP_FILES = 40;
 
     static OkHttpClient http;
@@ -84,26 +80,26 @@ public class YtAudio {
         return FF_UA;
     }
 
-    /** direct audio link. pick = 0 normal, 1+ = ask again without the cache (used when a download did not work).
-     *  Long audio (over 15 min) automatically gets the lowest quality, so it is small and fast. */
-    @androidx.media3.common.util.UnstableApi
+    /** direct audio link (m4a preferred). pick = 0 best, 1 next best, ... (used when a download did not work) */
     static String audioUrl(String id, int pick) throws Exception {
-        return link(id, pick).url;
-    }
-
-    /** the audio link WITH the user agent it was made for (YouTube refuses a link that is used with a different one).
-     *  pick 0 = normal, 1 = fresh link, 2 = a different kind of link (NewPipe) */
-    @androidx.media3.common.util.UnstableApi
-    static YtStream.Link link(String id, int pick) throws Exception {
         init();
-        if (pick >= 2) {
-            try { return YtStream.findAlt(id); } catch (Exception e) { /* fall back to the normal way */ }
+        StreamInfo info = StreamInfo.getInfo("https://www.youtube.com/watch?v=" + id);
+        ArrayList<AudioStream> list = new ArrayList<>();
+        for (AudioStream a : info.getAudioStreams()) {
+            if (a.getDeliveryMethod() == DeliveryMethod.PROGRESSIVE_HTTP) list.add(a);
         }
-        return YtStream.find(id, pick > 0);
+        if (list.isEmpty()) throw new Exception("no audio stream found");
+        // m4a first, then the higher bitrate
+        list.sort((x, y) -> {
+            boolean mx = x.getFormat() == MediaFormat.M4A, my = y.getFormat() == MediaFormat.M4A;
+            if (mx != my) return mx ? -1 : 1;
+            return Integer.compare(y.getAverageBitrate(), x.getAverageBitrate());
+        });
+        return list.get(Math.min(pick, list.size() - 1)).getContent();
     }
 
     /** the audio server, asked with OkHttp */
-    static AudioFetch.Source okSource(final String url, final String ua, final long knownTotal) {
+    static AudioFetch.Source okSource(final String url, final String ua) {
         final Pattern cr = Pattern.compile("bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)|bytes\\s+\\*/(\\d+)");
         return (start, end) -> {
             okhttp3.Request req = new okhttp3.Request.Builder().url(url + "&range=" + start + "-" + end)
@@ -123,9 +119,6 @@ public class YtAudio {
                         }
                     }
                 }
-                // YouTube's Content-Range size is wrong when &range= is used (it says "end of this piece + 1"): use the size from the link
-                if (knownTotal >= 0) p.total = knownTotal;
-                else if (p.total == end + 1) p.total = -1;
                 if (p.code == 200 || p.code == 206) p.data = r.body() != null ? r.body().bytes() : new byte[0];
                 return p;
             }
@@ -138,9 +131,7 @@ public class YtAudio {
      * The audio file of a song, downloaded and CHECKED. Only a complete file is ever returned or kept.
      * One download per song at a time (the "next song" preloader and the player used to write the same file together).
      */
-    static File ensureFile(Context c, String id, BooleanSupplier cancelled) throws Exception { return ensureFile(c, id, cancelled, null); }
-
-    static File ensureFile(Context c, String id, BooleanSupplier cancelled, final Progress progress) throws Exception {
+    static File ensureFile(Context c, String id, BooleanSupplier cancelled) throws Exception {
         File dir = new File(c.getCacheDir(), "yt");
         if (!dir.exists()) dir.mkdirs();
         File f = new File(dir, id + ".m4a");
@@ -153,45 +144,28 @@ public class YtAudio {
             }
 
             Exception last = null;
-            StringBuilder why = new StringBuilder();                // what went wrong on each try (shown to the user, so a failure can be understood)
             for (int attempt = 0; attempt < 3; attempt++) {
                 if (cancelled != null && cancelled.getAsBoolean()) throw new Exception("cancelled");
                 File tmp = new File(dir, id + "." + attempt + ".part");
                 try {
-                    YtStream.Link lk = link(id, attempt);        // 2nd try: a fresh link, 3rd try: a different kind of link
-                    String url = lk.url;
-                    String ua = (lk.ua != null && !lk.ua.isEmpty()) ? lk.ua : uaFor(url);
-                    long total = lk.total;
-                    if (total < 0) {
-                        String clen = Uri.parse(url).getQueryParameter("clen");
-                        if (clen != null) { try { total = Long.parseLong(clen); } catch (Exception e) { } }
-                    }
-                    // always 1 MB pieces (bigger ones got HTTP 403)
-                    long chunk = CHUNK;
-                    AudioFetch.Source plain = okSource(url, ua, total);
-                    final long hint = total;
-                    AudioFetch.Source src = progress == null ? plain : (a, b) -> {
-                        AudioFetch.Part p = plain.get(a, b);
-                        long all = p.total >= 0 ? p.total : hint;
-                        if (p.data != null && p.data.length > 0) progress.on(Math.min(a + p.data.length, all >= 0 ? all : Long.MAX_VALUE), all);
-                        return p;
-                    };
-                    AudioFetch.download(tmp, src, total, chunk, cancelled);
+                    String url = audioUrl(id, attempt == 2 ? 1 : 0);        // last try: the next best stream
+                    String ua = uaFor(url);
+                    long total = -1;
+                    String clen = Uri.parse(url).getQueryParameter("clen");
+                    if (clen != null) { try { total = Long.parseLong(clen); } catch (Exception e) { } }
+                    // 1st try: 1 MB pieces. 2nd and 3rd try: one single big request
+                    long chunk = attempt == 0 ? CHUNK : 64L * 1024 * 1024;
+                    AudioFetch.download(tmp, okSource(url, ua), total, chunk, cancelled);
                     if (!tmp.renameTo(f)) throw new IOException("could not save the audio file");
-                    if (progress != null) progress.on(f.length(), f.length());
                     trim(dir);
                     return f;
                 } catch (Exception e) {
                     last = e;
                     tmp.delete();
                     if ("cancelled".equals(e.getMessage())) throw e;
-                    String em = String.valueOf(e.getMessage());
-                    if (em.length() > 70) em = em.substring(0, 70);
-                    if (why.length() > 0) why.append(" | ");
-                    why.append(em);
                 }
             }
-            throw new IOException(why.length() > 0 ? why.toString() : (last != null ? String.valueOf(last.getMessage()) : "download failed"));
+            throw last != null ? last : new IOException("download failed");
         }
     }
 
@@ -200,12 +174,9 @@ public class YtAudio {
             File[] fs = dir.listFiles((d, n) -> n.endsWith(".m4a"));
             File[] parts = dir.listFiles((d, n) -> n.endsWith(".part"));
             if (parts != null) for (File p : parts) if (System.currentTimeMillis() - p.lastModified() > 10 * 60 * 1000) p.delete();
-            if (fs == null) return;
+            if (fs == null || fs.length <= KEEP_FILES) return;
             java.util.Arrays.sort(fs, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
-            long sum = 0; for (File x : fs) sum += x.length();
-            int i = 0;
-            // keep at most 40 songs and about 600 MB of saved audio (long podcasts are big)
-            while (i < fs.length - 1 && (fs.length - i > KEEP_FILES || sum > 600L * 1024 * 1024)) { sum -= fs[i].length(); fs[i].delete(); i++; }
+            for (int i = 0; i < fs.length - KEEP_FILES; i++) fs[i].delete();
         } catch (Exception e) { }
     }
 }

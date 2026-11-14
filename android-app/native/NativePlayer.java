@@ -10,7 +10,6 @@ import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.PlaybackParameters;
-import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
 
 import java.io.File;
@@ -19,7 +18,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /** Glue between the web app (through KeepAlivePlugin) and the native player. */
-@androidx.media3.common.util.UnstableApi
 final class NativePlayer {
     interface Cb { void done(boolean ok, String err); }
 
@@ -71,25 +69,22 @@ final class NativePlayer {
         lastErr = code == null ? "" : code;
         final Meta m = curMeta;
         final PlayerService s = PlayerService.instance;
-        if (m == null || s == null || s.exo == null || retry >= 3) { giveUp(); return; }
+        // add what the saved file looks like, so an error message tells us the reason
+        boolean bad = false;
+        if (m != null && s != null) {
+            File cf = new File(new File(s.getCacheDir(), "yt"), m.id + ".m4a");
+            if (cf.exists()) { bad = !AudioFetch.valid(cf); lastErr += " [" + (cf.length() / 1024) + " KB" + (bad ? ", incomplete file" : ", file ok") + "]"; }
+        }
+        if (m == null || s == null || s.exo == null || retry >= 2) { giveUp(); return; }
         final int attempt = ++retry, my = token;
+        final boolean redo = bad;
         final long at = Math.max(0, s.exo.getCurrentPosition());
-        // how long is this audio? (long podcasts are never downloaded as a whole file, they are only re-streamed)
-        YtStream.Link old = YtStream.cached(m.id);
-        final boolean longAudio = old != null && old.lenSec > YtStream.LONG_SECONDS;
         pool.execute(() -> {
             try {
-                YtStream.forget(m.id);                                  // the link may have expired: ask for a new one
-                Uri src;
-                if (attempt == 3 && !longAudio) {                       // last try for a normal song: download the whole file
-                    new File(new File(s.getCacheDir(), "yt"), m.id + ".m4a").delete();
-                    src = Uri.fromFile(YtAudio.ensureFile(s, m.id, () -> token != my));
-                } else {
-                    src = longAudio ? sourceFor(s, m) : localOrStream(s, m, () -> token != my);
-                }
+                if (attempt == 2 || redo) { m.src = null; new File(new File(s.getCacheDir(), "yt"), m.id + ".m4a").delete(); }
+                final Uri src = m.src != null ? m.src : resolveSource(s, m, () -> token != my);
                 m.src = src;
-                final Uri fsrc = src;
-                main.post(() -> { if (token == my) startItem(fsrc, m, at); });
+                main.post(() -> { if (token == my) startItem(src, m, at); });
             } catch (Exception e) {
                 main.post(() -> giveUp());
             }
@@ -102,34 +97,15 @@ final class NativePlayer {
         catch (Exception e) { return false; }
     }
 
-    /** Where to play from. Never waits for a download:
-     *  1) a song the user downloaded   2) a complete saved copy   3) live streaming (starts in about a second) */
-    private static Uri sourceFor(Context c, Meta m) {
+    private static Uri resolveSource(Context c, Meta m, java.util.function.BooleanSupplier cancelled) throws Exception {
         if (readable(c, m.uri)) return Uri.parse(m.uri);
-        File cf = new File(new File(c.getCacheDir(), "yt"), m.id + ".m4a");
-        if (cf.exists() && AudioFetch.valid(cf)) { cf.setLastModified(System.currentTimeMillis()); return Uri.fromFile(cf); }
-        return YtStream.uriFor(m.id);
-    }
-
-    /** Normal songs (under 15 min) are downloaded completely and CHECKED first, then played from that file:
-     *  a file never ends early, never goes silent after a jump, and jumping is instant.
-     *  Long audio (podcasts) is streamed. If the download does not work, streaming is the fallback. */
-    private static Uri localOrStream(Context c, Meta m, java.util.function.BooleanSupplier cancelled) {
-        Uri src = sourceFor(c, m);
-        if (!YtStream.SCHEME.equals(src.getScheme())) return src;           // already a file / a song you downloaded
-        try {
-            YtStream.Link l = YtStream.find(m.id, false);
-            if (l.lenSec > 0 && l.lenSec <= YtStream.LONG_SECONDS) {
-                return Uri.fromFile(YtAudio.ensureFile(c, m.id, cancelled));
-            }
-        } catch (Exception e) { /* could not get a complete file: stream it instead */ }
-        return src;
+        return Uri.fromFile(YtAudio.ensureFile(c, m.id, cancelled));
     }
 
     private static MediaItem item(Uri src, Meta m) {
         MediaMetadata.Builder md = new MediaMetadata.Builder().setTitle(m.title).setArtist(m.artist);
         if (m.thumb != null && !m.thumb.isEmpty()) { try { md.setArtworkUri(Uri.parse(m.thumb)); } catch (Exception e) { } }
-        return new MediaItem.Builder().setUri(src).setMediaId(m.id).setMimeType("audio/mp4").setMediaMetadata(md.build()).build();
+        return new MediaItem.Builder().setUri(src).setMediaId(m.id).setMediaMetadata(md.build()).build();
     }
 
     // must run on the main thread
@@ -156,42 +132,34 @@ final class NativePlayer {
 
     static void play(final Context ctx, final Meta m, final Cb cb) {
         final int my = ++token;
-        next = null; retry = 0; lastErr = "";
+        next = null; retry = 0;
         main.post(() -> { PlayerService s = PlayerService.instance; if (s != null && s.exo != null) s.exo.pause(); });
         pool.execute(() -> {
             try {
-                if (!ensureService(ctx)) { cb.done(false, "player service did not start"); return; }
+                Uri src = resolveSource(ctx, m, () -> token != my);
                 if (token != my) { cb.done(false, "cancelled"); return; }
-                cb.done(true, null);                       // answer now: the download below may take a few seconds
-                final Uri src = localOrStream(ctx, m, () -> token != my);
-                if (token != my) return;
-                m.src = src;
-                main.post(() -> { if (token == my) startItem(src, m); });
+                if (!ensureService(ctx)) { cb.done(false, "player service did not start"); return; }
+                final Uri fsrc = src;
+                m.src = fsrc;
+                main.post(() -> { if (token == my) startItem(fsrc, m); });
+                cb.done(true, null);
             } catch (Exception e) {
-                if (token == my) main.post(() -> giveUp());
+                cb.done(false, String.valueOf(e.getMessage()));
             }
         });
     }
 
     static void setNext(final Context ctx, final Meta m) {
         next = m;
-        m.src = sourceFor(ctx, m);
         pool.execute(() -> {
-            try {
-                if (!YtStream.SCHEME.equals(m.src.getScheme())) return;
-                YtStream.Link l = YtStream.find(m.id, false);                // link ready = next song starts at once
-                if (l.lenSec > 0 && l.lenSec <= YtStream.LONG_SECONDS) {
-                    Uri f = Uri.fromFile(YtAudio.ensureFile(ctx, m.id, () -> next != m));   // the whole next song, checked
-                    if (next == m) m.src = f;
-                }
-            } catch (Exception e) { }
+            try { m.src = resolveSource(ctx, m, () -> next != m); } catch (Exception e) { }
         });
     }
 
     /** current song finished: if the next one is ready, start it here, even if the web page is asleep */
     static void onEnded() {
         Meta n = next;
-        if (n != null && n.src != null) {   // n.src is always set (a stream address needs no waiting)
+        if (n != null && n.src != null) {
             next = null; token++; retry = 0;
             advSeq++;
             startItem(n.src, n);
@@ -212,65 +180,4 @@ final class NativePlayer {
     }
 
     static void speed(final float s) { withPlayer(p -> p.setPlaybackParameters(new PlaybackParameters(s, 1f))); }
-
-    // ------------------------------------------------------------------ jumping inside a song
-
-    static volatile int seekToken = 0;
-
-    /** how many pieces of audio the audio decoder has played so far (-1 = cannot be read). Done by name, so it can never break the build. */
-    private static int rendered(ExoPlayer p) {
-        try {
-            Object dc = ExoPlayer.class.getMethod("getAudioDecoderCounters").invoke(p);
-            if (dc == null) return -1;
-            try { dc.getClass().getMethod("ensureUpdated").invoke(dc); } catch (Throwable t) { }
-            return dc.getClass().getField("renderedOutputBufferCount").getInt(dc);
-        } catch (Throwable t) { return -1; }
-    }
-
-    /** load the current song again and carry on from the given spot (a complete saved copy is used if there is one) */
-    static void reloadAt(final long at) {
-        final Meta m = curMeta;
-        final PlayerService s = PlayerService.instance;
-        if (m == null || s == null || s.exo == null) return;
-        final int my = token;
-        pool.execute(() -> {
-            try {
-                YtStream.forget(m.id);                               // ask for a fresh audio link
-                final Uri src = sourceFor(s, m);
-                m.src = src;
-                main.post(() -> { if (token == my) startItem(src, m, at); });
-            } catch (Exception e) { }
-        });
-    }
-
-    /** Jump to a spot in the song. Afterwards the player is watched: if it is stuck loading, or "plays" but nothing
-     *  comes out of the speaker (what happened after jumping far ahead), the song is loaded again from that spot. */
-    static void seek(final long ms) {
-        final int my = ++seekToken;
-        withPlayer(p -> {
-            final int before = rendered(p);
-            p.seekTo(ms);
-            watchSeek(my, ms, before, 0);
-        });
-    }
-
-    private static void watchSeek(final int my, final long target, final int before, final int round) {
-        main.postDelayed(() -> {
-            if (seekToken != my) return;                              // you jumped again: that jump has its own watch
-            PlayerService s = PlayerService.instance;
-            if (s == null || s.exo == null) return;
-            ExoPlayer p = s.exo;
-            int st = p.getPlaybackState();
-            if (st == Player.STATE_ENDED || st == Player.STATE_IDLE || !p.getPlayWhenReady()) return;   // finished, or you paused it
-            long at = Math.max(target, Math.max(0, p.getCurrentPosition()));
-            boolean stuck = st == Player.STATE_BUFFERING && round >= 1;           // still loading about 8 s after the jump
-            boolean silent = false;
-            if (st == Player.STATE_READY && p.isPlaying() && before >= 0) {
-                int now = rendered(p);
-                silent = now >= 0 && now - before < 5;                            // the decoder produced (almost) nothing since the jump
-            }
-            if (stuck || silent) { reloadAt(at); return; }
-            if (round < 2) watchSeek(my, target, before, round + 1);
-        }, round == 0 ? 3000 : 5000);
-    }
 }

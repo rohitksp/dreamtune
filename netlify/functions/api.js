@@ -161,12 +161,7 @@ async function findAudio(id) {
             const fmts = ((d.streamingData && d.streamingData.adaptiveFormats) || [])
                 .filter(f => f.url && /^audio\/mp4/.test(f.mimeType || '') && Number(f.contentLength) > 0);
             if (!fmts.length) { lastErr = 'no direct audio link'; continue; }
-            const lenSec = Number(d.videoDetails && d.videoDetails.lengthSeconds) || 0;
-            // long songs (over 15 min) easily blow past the download size limit at full quality,
-            // so for those take the smallest usable audio instead of the usual 128kbps pick
-            const f = lenSec > 900
-                ? (fmts.filter(x => (x.bitrate || 0) > 20000).sort((a, b) => (a.bitrate || 0) - (b.bitrate || 0))[0] || fmts.sort((a, b) => (a.bitrate || 0) - (b.bitrate || 0))[0])
-                : (fmts.find(x => x.itag === 140) || fmts.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]);
+            const f = fmts.find(x => x.itag === 140) || fmts.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
             const rec = { url: f.url, total: Number(f.contentLength), ua: c.ua, exp: Date.now() + 12 * 60 * 1000 };
             linkCache.set(id, rec);
             return rec;
@@ -225,23 +220,6 @@ exports.handler = async (event) => {
             return {
                 statusCode: 200, isBase64Encoded: true,
                 headers: { 'Content-Type': 'audio/mp4', 'X-Total-Length': String(total), 'Access-Control-Expose-Headers': 'X-Total-Length', 'Cache-Control': 'private, max-age=3600' },
-                body: buf.toString('base64')
-            };
-        }
-        if (route === 'audio') {
-            // The browser's audio tag asks for pieces with a Range header. The first piece is small, so playback starts at once.
-            const id = String(p.id || '');
-            if (!/^[\w-]{11}$/.test(id)) return json(400, { error: 'bad id' });
-            const h = event.headers || {};
-            const m = /bytes=(\d+)-(\d*)/.exec(h.range || h.Range || '');
-            const start = m ? parseInt(m[1], 10) : 0;
-            const asked = m && m[2] ? parseInt(m[2], 10) - start + 1 : Infinity;
-            const size = Math.max(1, Math.min(asked, start === 0 ? 393216 : 1572864));
-            const { total, buf } = await streamChunk(id, start, size);
-            if (start >= total || !buf.length) return { statusCode: 416, headers: { 'Content-Range': `bytes */${total}` }, body: '' };
-            return {
-                statusCode: 206, isBase64Encoded: true,
-                headers: { 'Content-Type': 'audio/mp4', 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${start}-${start + buf.length - 1}/${total}`, 'Cache-Control': 'private, max-age=3600' },
                 body: buf.toString('base64')
             };
         }

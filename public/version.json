@@ -1,13 +1,5 @@
 {
-  "android": 4,
-  "web": "2026.11.15.1",
-  "apk": "https://github.com/rohitksp/dreamtune/releases/latest/download/DreamTune.apk",
+  "android": 2,
   "url": "https://github.com/rohitksp/dreamtune/releases/latest",
-  "notes": [
-    "Song downloads fixed",
-    "Jumping ahead in a song no longer goes silent",
-    "App update downloads and installs inside DreamTune, and the New mark goes away after updating"
-  ],
-  "note": "HOW TO RELEASE AN UPDATE: (1) changed anything inside android-app/ -> just push it. The cloud build makes the new app, puts it on the website AND sets the 'android' number here by itself (do not edit it by hand). (2) changed only the website -> change the web text to anything new (e.g. today's date). (3) edit notes (max 5 lines). Then deploy. Everyone sees the Update popup; Skip hides it until the next version.",
-  "apkDirect": "/app/DreamTune.apk"
+  "note": "Bump android when you change anything in android-app/ (icons, Java code, permissions)."
 }

@@ -9,17 +9,12 @@ import androidx.media3.common.C;
 import androidx.media3.common.ForwardingPlayer;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
-import androidx.media3.datasource.DataSource;
-import androidx.media3.datasource.DefaultDataSource;
-import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.ExoPlayer;
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.session.MediaSession;
 import androidx.media3.session.MediaSessionService;
 
 /** The real music player. Runs as a foreground media service, so it keeps playing with the screen off,
  *  and shows the lock-screen / notification controls. It does not depend on the WebView at all. */
-@androidx.media3.common.util.UnstableApi
 public class PlayerService extends MediaSessionService {
     static volatile PlayerService instance;
     ExoPlayer exo;
@@ -28,16 +23,10 @@ public class PlayerService extends MediaSessionService {
     @Override
     public void onCreate() {
         super.onCreate();
-        // dtyt://  addresses are streamed live (YtStream); files and phone songs are read normally
-        DataSource.Factory data = new DefaultDataSource.Factory(this, new YtStream.Factory());
-        // start playing after 1 s of audio (default is 2.5 s) and keep a big cushion ahead, so a weak network moment does not stop a long podcast
-        DefaultLoadControl load = new DefaultLoadControl.Builder().setBufferDurationsMs(120000, 300000, 1000, 3000).build();
         exo = new ExoPlayer.Builder(this)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(data))
-                .setLoadControl(load)
                 .setAudioAttributes(new AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
                 .setHandleAudioBecomingNoisy(true)
-                .setWakeMode(C.WAKE_MODE_NETWORK)      // also keeps Wi-Fi awake, so a 2-hour podcast keeps loading with the screen off
+                .setWakeMode(C.WAKE_MODE_LOCAL)
                 .build();
 
         // show next / previous buttons and tell the web app when they are pressed
@@ -66,11 +55,7 @@ public class PlayerService extends MediaSessionService {
                 if (state == Player.STATE_ENDED) NativePlayer.onEnded();
             }
             @Override public void onIsPlayingChanged(boolean playing) { NativePlayer.snapshot(exo); }
-            @Override public void onPlayerError(PlaybackException error) {
-                String why = "";
-                try { Throwable c = error.getCause(); String m = c != null ? c.getMessage() : error.getMessage(); if (m != null) why = ": " + (m.length() > 60 ? m.substring(0, 60) : m); } catch (Exception e) { }
-                NativePlayer.onError(error.getErrorCodeName() + why);
-            }
+            @Override public void onPlayerError(PlaybackException error) { NativePlayer.onError(error.getErrorCodeName()); }
         });
         instance = this;
         NativePlayer.startTicker();
