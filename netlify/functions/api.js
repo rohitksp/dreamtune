@@ -161,7 +161,12 @@ async function findAudio(id) {
             const fmts = ((d.streamingData && d.streamingData.adaptiveFormats) || [])
                 .filter(f => f.url && /^audio\/mp4/.test(f.mimeType || '') && Number(f.contentLength) > 0);
             if (!fmts.length) { lastErr = 'no direct audio link'; continue; }
-            const f = fmts.find(x => x.itag === 140) || fmts.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+            const lenSec = Number(d.videoDetails && d.videoDetails.lengthSeconds) || 0;
+            // long songs (over 15 min) easily blow past the download size limit at full quality,
+            // so for those take the smallest usable audio instead of the usual 128kbps pick
+            const f = lenSec > 900
+                ? (fmts.filter(x => (x.bitrate || 0) > 20000).sort((a, b) => (a.bitrate || 0) - (b.bitrate || 0))[0] || fmts.sort((a, b) => (a.bitrate || 0) - (b.bitrate || 0))[0])
+                : (fmts.find(x => x.itag === 140) || fmts.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]);
             const rec = { url: f.url, total: Number(f.contentLength), ua: c.ua, exp: Date.now() + 12 * 60 * 1000 };
             linkCache.set(id, rec);
             return rec;
