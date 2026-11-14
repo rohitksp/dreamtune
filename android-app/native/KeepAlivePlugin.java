@@ -195,7 +195,7 @@ public class KeepAlivePlugin extends Plugin {
     @PluginMethod
     public void nSeek(PluginCall call) {
         final long ms = (long) (call.getDouble("ms", 0.0) + 0.5);
-        NativePlayer.withPlayer(p -> p.seekTo(ms));
+        NativePlayer.seek(ms);
         call.resolve();
     }
 
@@ -299,12 +299,13 @@ public class KeepAlivePlugin extends Plugin {
     /* ---------- in-app update: download the new APK inside DreamTune and open Android's installer ---------- */
     private static volatile String upState = "none", upErr = "";
     private static volatile long upDone = 0, upTotal = -1;
+    private static final Object UP_LOCK = new Object();
 
     private static void fetchApk(String url, File target) throws Exception {
         YtAudio.init();
-        okhttp3.Request req = new okhttp3.Request.Builder().url(url).build();
+        okhttp3.Request req = new okhttp3.Request.Builder().url(url).header("Cache-Control", "no-cache").build();
         try (okhttp3.Response r = YtAudio.http.newCall(req).execute()) {
-            if (!r.isSuccessful() || r.body() == null) throw new java.io.IOException("HTTP " + r.code());
+            if (!r.isSuccessful() || r.body() == null) throw new java.io.IOException(r.code() == 404 ? "file not found (HTTP 404)" : "HTTP " + r.code());
             upTotal = r.body().contentLength();
             File tmp = new File(target.getParentFile(), "download.part");
             try (java.io.InputStream in = r.body().byteStream(); FileOutputStream out = new FileOutputStream(tmp)) {
@@ -320,32 +321,58 @@ public class KeepAlivePlugin extends Plugin {
         }
     }
 
+    /** the downloaded app must be NEWER than the installed one, otherwise installing it changes nothing
+     *  (and the "New" mark in App updates would never go away) */
+    private static void checkNewer(Context c, File f) throws Exception {
+        android.content.pm.PackageManager pm = c.getPackageManager();
+        android.content.pm.PackageInfo n = pm.getPackageArchiveInfo(f.getAbsolutePath(), 0);
+        if (n == null) return;                                           // cannot read it here: let Android's installer decide
+        android.content.pm.PackageInfo cur = pm.getPackageInfo(c.getPackageName(), 0);
+        long nv = Build.VERSION.SDK_INT >= 28 ? n.getLongVersionCode() : n.versionCode;
+        long cv = Build.VERSION.SDK_INT >= 28 ? cur.getLongVersionCode() : cur.versionCode;
+        if (nv <= cv) { f.delete(); throw new Exception("the new app is still being built - please try again in a few minutes"); }
+    }
+
     @PluginMethod
     public void updStart(final PluginCall call) {
         final String u1 = call.getString("url", ""), u2 = call.getString("url2", "");
-        if ("run".equals(upState)) { call.resolve(); return; }
-        upState = "run"; upDone = 0; upTotal = -1; upErr = "";
-        DL_POOL.execute(() -> {
+        synchronized (UP_LOCK) {
+            if ("run".equals(upState)) { call.resolve(); return; }
+            upState = "run"; upDone = 0; upTotal = -1; upErr = "";
+        }
+        final Context ctx = getContext();
+        Thread t = new Thread(() -> {                                    // its own thread: song downloads can never block an update
             try {
-                File dir = new File(getContext().getCacheDir(), "updates");
+                File dir = new File(ctx.getCacheDir(), "updates");
                 dir.mkdirs();
                 File f = new File(dir, "DreamTune.apk");
-                boolean fresh = f.exists() && f.length() > 1024 * 1024 && System.currentTimeMillis() - f.lastModified() < 20 * 60 * 1000L;
-                if (!fresh) {
-                    Exception last = null;
+                boolean have = false;
+                if (f.exists() && f.length() > 1024 * 1024 && System.currentTimeMillis() - f.lastModified() < 20 * 60 * 1000L) {
+                    try { checkNewer(ctx, f); have = true; } catch (Exception e) { f.delete(); }     // a recent download is reused only if it is really newer
+                } else if (f.exists()) f.delete();
+                if (!have) {
+                    StringBuilder why = new StringBuilder();
                     boolean ok = false;
                     for (String u : new String[] { u1, u2 }) {
                         if (u == null || u.isEmpty()) continue;
-                        try { fetchApk(u, f); ok = true; break; } catch (Exception e) { last = e; upDone = 0; }
+                        try { upDone = 0; upTotal = -1; fetchApk(u, f); ok = true; break; }
+                        catch (Exception e) {
+                            String host = u;
+                            try { host = new java.net.URI(u).getHost(); } catch (Exception x) { }
+                            why.append(host).append(": ").append(e.getMessage()).append(". ");
+                        }
                     }
-                    if (!ok) throw last != null ? last : new Exception("no update link");
+                    if (!ok) throw new Exception(why.length() > 0 ? why.toString().trim() : "no update link");
+                    checkNewer(ctx, f);
                 }
                 upState = "ready";
             } catch (Exception e) {
                 upErr = String.valueOf(e.getMessage());
                 upState = "error";
             }
-        });
+        }, "dt-update");
+        t.setDaemon(true);
+        t.start();
         call.resolve();
     }
 

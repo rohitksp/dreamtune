@@ -14,7 +14,7 @@ public class MainActivity extends BridgeActivity {
         try {
             WebSettings s = getBridge().getWebView().getSettings();
             s.setMediaPlaybackRequiresUserGesture(false);   // let the next song start by itself with the screen off
-            s.setUserAgentString(s.getUserAgentString() + " DreamTuneApp/4");   // bump together with public/version.json when native code changes
+            s.setUserAgentString(s.getUserAgentString() + " DreamTuneApp/4");   // the number is set automatically by the build (scripts/patch-android.js) and written to public/version.json
         } catch (Exception e) { }
 
         // Back button / swipe-back: the web app decides (close a sheet, go to the previous page, or "press again to exit")

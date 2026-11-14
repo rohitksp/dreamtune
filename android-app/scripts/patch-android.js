@@ -5,6 +5,13 @@ fs.mkdirSync(pkgDir, { recursive: true });
 ['KeepAliveService.java', 'KeepAlivePlugin.java', 'MainActivity.java', 'PlayerService.java', 'NativePlayer.java', 'YtAudio.java', 'AudioFetch.java', 'YtStream.java']
   .forEach(f => fs.copyFileSync(path.join('native', f), path.join(pkgDir, f)));
 
+// ---- the app tells the website which build it is (DreamTuneApp/<build number>); the same number goes into public/version.json
+// by the workflow, so after an update the app and the website agree and the "New" mark disappears
+if (process.env.GITHUB_RUN_NUMBER) {
+  const ma = path.join(pkgDir, 'MainActivity.java');
+  fs.writeFileSync(ma, fs.readFileSync(ma, 'utf8').replace(/DreamTuneApp\/\d+/, 'DreamTuneApp/' + process.env.GITHUB_RUN_NUMBER));
+}
+
 // ---- manifest: permissions + services
 const mf = path.join('android', 'app', 'src', 'main', 'AndroidManifest.xml');
 let x = fs.readFileSync(mf, 'utf8');

@@ -4,11 +4,10 @@
   "apk": "https://github.com/rohitksp/dreamtune/releases/latest/download/DreamTune.apk",
   "url": "https://github.com/rohitksp/dreamtune/releases/latest",
   "notes": [
-    "The app now updates itself - no browser, no GitHub",
-    "Songs start fast and never switch to another player",
-    "Downloads can be cancelled at once",
-    "Back button goes to the previous page"
+    "Song downloads fixed",
+    "Jumping ahead in a song no longer goes silent",
+    "App update downloads and installs inside DreamTune, and the New mark goes away after updating"
   ],
-  "note": "HOW TO RELEASE AN UPDATE: (1) changed anything inside android-app/ -> raise the android number by 1 AND bump DreamTuneApp/N in MainActivity.java. (2) changed only the website -> change the web text to anything new (e.g. today's date). (3) edit notes (max 5 lines). Then deploy. Everyone sees the Update popup; Skip hides it until the next version.",
+  "note": "HOW TO RELEASE AN UPDATE: (1) changed anything inside android-app/ -> just push it. The cloud build makes the new app, puts it on the website AND sets the 'android' number here by itself (do not edit it by hand). (2) changed only the website -> change the web text to anything new (e.g. today's date). (3) edit notes (max 5 lines). Then deploy. Everyone sees the Update popup; Skip hides it until the next version.",
   "apkDirect": "/app/DreamTune.apk"
 }

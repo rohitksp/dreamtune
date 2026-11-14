@@ -35,8 +35,8 @@ public class YtAudio {
     private static final String FF_UA = "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0";
     private static final String IOS_UA = "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)";
     private static final String VR_UA = "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
-    private static final long CHUNK = 4L * 1024 * 1024;
-    private static final long BIG_CHUNK = 16L * 1024 * 1024;     // retries: bigger pieces, but never so big that the phone runs out of memory
+    private static final long CHUNK = 1L * 1024 * 1024;          // normal pieces (the same size the website route always used)
+    private static final long BIG_CHUNK = 3L * 1024 * 1024;      // 2nd try: bigger pieces, but never so big that the phone runs out of memory
 
     /** progress of a download: bytes saved so far / total bytes (total = -1 when unknown) */
     interface Progress { void on(long done, long total); }
@@ -88,8 +88,18 @@ public class YtAudio {
      *  Long audio (over 15 min) automatically gets the lowest quality, so it is small and fast. */
     @androidx.media3.common.util.UnstableApi
     static String audioUrl(String id, int pick) throws Exception {
+        return link(id, pick).url;
+    }
+
+    /** the audio link WITH the user agent it was made for (YouTube refuses a link that is used with a different one).
+     *  pick 0 = normal, 1 = fresh link, 2 = a different kind of link (NewPipe) */
+    @androidx.media3.common.util.UnstableApi
+    static YtStream.Link link(String id, int pick) throws Exception {
         init();
-        return YtStream.find(id, pick > 0).url;
+        if (pick >= 2) {
+            try { return YtStream.findAlt(id); } catch (Exception e) { /* fall back to the normal way */ }
+        }
+        return YtStream.find(id, pick > 0);
     }
 
     /** the audio server, asked with OkHttp */
@@ -140,17 +150,21 @@ public class YtAudio {
             }
 
             Exception last = null;
+            StringBuilder why = new StringBuilder();                // what went wrong on each try (shown to the user, so a failure can be understood)
             for (int attempt = 0; attempt < 3; attempt++) {
                 if (cancelled != null && cancelled.getAsBoolean()) throw new Exception("cancelled");
                 File tmp = new File(dir, id + "." + attempt + ".part");
                 try {
-                    String url = audioUrl(id, attempt);        // 2nd and 3rd try: a fresh link
-                    String ua = uaFor(url);
-                    long total = -1;
-                    String clen = Uri.parse(url).getQueryParameter("clen");
-                    if (clen != null) { try { total = Long.parseLong(clen); } catch (Exception e) { } }
-                    // 1st try: 1 MB pieces. 2nd and 3rd try: one single big request
-                    long chunk = attempt == 0 ? CHUNK : BIG_CHUNK;
+                    YtStream.Link lk = link(id, attempt);        // 2nd try: a fresh link, 3rd try: a different kind of link
+                    String url = lk.url;
+                    String ua = (lk.ua != null && !lk.ua.isEmpty()) ? lk.ua : uaFor(url);
+                    long total = lk.total;
+                    if (total < 0) {
+                        String clen = Uri.parse(url).getQueryParameter("clen");
+                        if (clen != null) { try { total = Long.parseLong(clen); } catch (Exception e) { } }
+                    }
+                    // 1st and 3rd try: 1 MB pieces. 2nd try: bigger pieces
+                    long chunk = attempt == 1 ? BIG_CHUNK : CHUNK;
                     AudioFetch.Source plain = okSource(url, ua);
                     final long hint = total;
                     AudioFetch.Source src = progress == null ? plain : (a, b) -> {
@@ -168,9 +182,13 @@ public class YtAudio {
                     last = e;
                     tmp.delete();
                     if ("cancelled".equals(e.getMessage())) throw e;
+                    String em = String.valueOf(e.getMessage());
+                    if (em.length() > 70) em = em.substring(0, 70);
+                    if (why.length() > 0) why.append(" | ");
+                    why.append(em);
                 }
             }
-            throw last != null ? last : new IOException("download failed");
+            throw new IOException(why.length() > 0 ? why.toString() : (last != null ? String.valueOf(last.getMessage()) : "download failed"));
         }
     }
 

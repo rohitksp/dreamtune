@@ -1132,7 +1132,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (err && err.message === 'cancelled') { /* user cancelled: nothing to report */ }
             else {
                 console.error('Download failed:', err);
-                showToast(!navigator.onLine ? 'Download failed - check your internet and try again' : (err && err.message === 'stalled') ? 'The download did not start - please try again' : 'Could not download this song right now - please try again in a moment', 4500);
+                const why = String((err && err.message) || '').slice(0, 90);
+                showToast(!navigator.onLine ? 'Download failed - check your internet and try again' : (err && err.message === 'stalled') ? 'The download did not start - please try again' : 'Could not download this song' + (why ? ' (' + why + ')' : '') + ' - please try again in a moment', 6000);
             }
         } finally {
             if (dlRun.get(track.id) === run) dlRun.delete(track.id);
@@ -1577,16 +1578,23 @@ document.addEventListener('DOMContentLoaded', () => {
         async function installInApp(v, ui) {
             if (upBusy) return; upBusy = true;
             const say = (t, busy) => { if (ui && ui.btn) { ui.btn.querySelector('.btn-label').textContent = t; ui.btn.disabled = !!busy; } if (ui && ui.skip) ui.skip.disabled = !!busy; };
+            const showErr = (t) => { if (ui && ui.err) { ui.err.textContent = t || ''; ui.err.style.display = t ? 'block' : 'none'; } };
             try {
+                showErr('');
                 const direct = new URL(v.apkDirect || '/app/DreamTune.apk', location.origin).href;
                 say('Starting...', true);
                 await nat('KeepAlive', 'updStart', { url: direct, url2: v.apk || '' });
-                let quiet = 0;
+                let quiet = 0, lastPct = -1, lastMove = Date.now();
                 for (;;) {
                     await sleep(400);
                     let st; try { st = await nat('KeepAlive', 'updState'); } catch (e) { if (++quiet > 15) throw e; continue; }
                     quiet = 0;
-                    if (st.state === 'run') { say(st.pct > 0 ? 'Downloading ' + st.pct + '%' : 'Downloading...', true); continue; }
+                    if (st.state === 'run') {
+                        const pc = st.pct || 0;
+                        if (pc !== lastPct) { lastPct = pc; lastMove = Date.now(); }
+                        else if (Date.now() - lastMove > 60000) throw new Error('the download did not move for 60 seconds');
+                        say(pc > 0 ? 'Downloading ' + pc + '%' : 'Downloading...', true); continue;
+                    }
                     if (st.state === 'ready') break;
                     throw new Error(st.err || 'download failed');
                 }
@@ -1601,9 +1609,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } catch (e) {
                 console.warn('in-app update failed:', e && e.message);
-                const old = /not implemented|UNIMPLEMENTED/i.test(String((e && e.message) || ''));     // this installed app is too old to update itself: the very first time only
-                say('Update now', false);
-                showToast(old ? 'This one time, download the app by hand - after that it updates inside DreamTune' : 'Could not download the update - check your internet and try again', 6000);
+                const msg = String((e && e.message) || '');
+                const old = /not implemented|UNIMPLEMENTED/i.test(msg);     // this installed app is too old to update itself: the very first time only
+                say(old ? 'Update now' : 'Try again', false);
+                if (!old) showErr('Could not update: ' + msg.slice(0, 160));
+                showToast(old ? 'This one time, download the app by hand - after that it updates inside DreamTune' : 'Could not download the update - see the message on the update screen', 6000);
                 if (old) openApkLink(v);
             } finally { upBusy = false; }
         }
@@ -1628,6 +1638,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <h3>New update is here!</h3>
                 <p class="upd-ver">${st.appUpdate ? 'A new DreamTune app is ready' : 'A new version of DreamTune is ready'}${v.web ? ' \u2022 ' + escapeHtml(String(v.web)) : ''}</p>
                 ${notes.length ? '<ul>' + notes.map(n => '<li>' + escapeHtml(String(n)) + '</li>').join('') + '</ul>' : '<p class="upd-ver" style="margin-bottom:16px">Please update to get the latest features and fixes.</p>'}
+                <p class="upd-ver" id="upd-err" style="display:none;color:#ff8a80;margin:0 0 12px;word-break:break-word"></p>
                 <div class="upd-actions">
                     <button type="button" class="btn-gradient" id="upd-now"><span class="material-symbols-rounded">download</span><span class="btn-label">${st.appUpdate ? 'Update now' : 'Update now (restart)'}</span></button>
                     <button type="button" class="upd-skip" id="upd-skip">Skip for now</button>
@@ -1635,7 +1646,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.body.appendChild(el);
             U.popup = el;
             $('upd-now').onclick = () => {
-                if (st.appUpdate) { installInApp(v, { btn: $('upd-now'), skip: $('upd-skip') }); return; }
+                if (st.appUpdate) { installInApp(v, { btn: $('upd-now'), skip: $('upd-skip'), err: $('upd-err') }); return; }
                 closePopup(); location.reload();
             };
             $('upd-skip').onclick = () => {

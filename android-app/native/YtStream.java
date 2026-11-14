@@ -84,6 +84,15 @@ final class YtStream {
         return l;
     }
 
+    /** Same as find(), but goes straight to NewPipe Extractor: a different kind of link, used when the quick one keeps failing. */
+    static Link findAlt(String id) throws Exception {
+        YtAudio.init();
+        Link l = findNewPipe(id);
+        l.exp = System.currentTimeMillis() + 20 * 60 * 1000L;
+        LINKS.put(id, l);
+        return l;
+    }
+
     /** Asks YouTube the way the phone apps do: one small request, answer in well under a second. */
     private static Link findFast(String id) throws Exception {
         if (fast == null) fast = YtAudio.http.newBuilder().callTimeout(5, TimeUnit.SECONDS).build();
@@ -231,17 +240,23 @@ final class YtStream {
                     int code = r.code();
                     if ((code == 200 || code == 206) && r.body() != null) {
                         String h = r.header("Content-Range");
+                        long asked = to - from + 1, bodyLen = r.body().contentLength();
+                        boolean whole = false;                                       // true = the server ignored the range and sends the whole file
                         if (h != null) {
                             Matcher m = CR.matcher(h);
                             if (m.find()) {
                                 String t = m.group(3) != null ? m.group(3) : m.group(4);
                                 if (t != null && !"*".equals(t)) total = Long.parseLong(t);
                             }
-                        } else if (code == 200 && r.body().contentLength() > 0) {
-                            total = r.body().contentLength();                       // server ignored the range and sends everything
+                        } else if (code == 200) {
+                            // 200 without Content-Range: if the body is only as long as the piece we asked for, it IS that piece
+                            // (the old code took its length for the size of the whole song, which made every jump ahead end at once)
+                            whole = bodyLen <= 0 || bodyLen > asked;
+                            if (whole && bodyLen > 0) total = bodyLen;
                         }
+                        if (total < 0 && l.total >= 0) total = l.total;              // the size YouTube told us with the link
                         InputStream s = r.body().byteStream();
-                        if (code == 200 && from > 0) {                               // skip to where we wanted to be
+                        if (whole && from > 0) {                                     // skip to where we wanted to be
                             long left = from;
                             while (left > 0) { long k = s.skip(left); if (k <= 0) { if (s.read() < 0) break; k = 1; } left -= k; }
                         }

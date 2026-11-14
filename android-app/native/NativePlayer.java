@@ -10,6 +10,7 @@ import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.PlaybackParameters;
+import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
 
 import java.io.File;
@@ -188,4 +189,65 @@ final class NativePlayer {
     }
 
     static void speed(final float s) { withPlayer(p -> p.setPlaybackParameters(new PlaybackParameters(s, 1f))); }
+
+    // ------------------------------------------------------------------ jumping inside a song
+
+    static volatile int seekToken = 0;
+
+    /** how many pieces of audio the audio decoder has played so far (-1 = cannot be read). Done by name, so it can never break the build. */
+    private static int rendered(ExoPlayer p) {
+        try {
+            Object dc = ExoPlayer.class.getMethod("getAudioDecoderCounters").invoke(p);
+            if (dc == null) return -1;
+            try { dc.getClass().getMethod("ensureUpdated").invoke(dc); } catch (Throwable t) { }
+            return dc.getClass().getField("renderedOutputBufferCount").getInt(dc);
+        } catch (Throwable t) { return -1; }
+    }
+
+    /** load the current song again and carry on from the given spot (a complete saved copy is used if there is one) */
+    static void reloadAt(final long at) {
+        final Meta m = curMeta;
+        final PlayerService s = PlayerService.instance;
+        if (m == null || s == null || s.exo == null) return;
+        final int my = token;
+        pool.execute(() -> {
+            try {
+                YtStream.forget(m.id);                               // ask for a fresh audio link
+                final Uri src = sourceFor(s, m);
+                m.src = src;
+                main.post(() -> { if (token == my) startItem(src, m, at); });
+            } catch (Exception e) { }
+        });
+    }
+
+    /** Jump to a spot in the song. Afterwards the player is watched: if it is stuck loading, or "plays" but nothing
+     *  comes out of the speaker (what happened after jumping far ahead), the song is loaded again from that spot. */
+    static void seek(final long ms) {
+        final int my = ++seekToken;
+        withPlayer(p -> {
+            final int before = rendered(p);
+            p.seekTo(ms);
+            watchSeek(my, ms, before, 0);
+        });
+    }
+
+    private static void watchSeek(final int my, final long target, final int before, final int round) {
+        main.postDelayed(() -> {
+            if (seekToken != my) return;                              // you jumped again: that jump has its own watch
+            PlayerService s = PlayerService.instance;
+            if (s == null || s.exo == null) return;
+            ExoPlayer p = s.exo;
+            int st = p.getPlaybackState();
+            if (st == Player.STATE_ENDED || st == Player.STATE_IDLE || !p.getPlayWhenReady()) return;   // finished, or you paused it
+            long at = Math.max(target, Math.max(0, p.getCurrentPosition()));
+            boolean stuck = st == Player.STATE_BUFFERING && round >= 1;           // still loading about 8 s after the jump
+            boolean silent = false;
+            if (st == Player.STATE_READY && p.isPlaying() && before >= 0) {
+                int now = rendered(p);
+                silent = now >= 0 && now - before < 5;                            // the decoder produced (almost) nothing since the jump
+            }
+            if (stuck || silent) { reloadAt(at); return; }
+            if (round < 2) watchSeek(my, target, before, round + 1);
+        }, round == 0 ? 3000 : 5000);
+    }
 }
