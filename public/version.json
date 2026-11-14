@@ -1,5 +1,14 @@
 {
-  "android": 2,
+  "android": 4,
+  "web": "2026.11.14.2",
+  "apk": "https://github.com/rohitksp/dreamtune/releases/latest/download/DreamTune.apk",
   "url": "https://github.com/rohitksp/dreamtune/releases/latest",
-  "note": "Bump android when you change anything in android-app/ (icons, Java code, permissions)."
+  "notes": [
+    "Long songs and podcasts now play in the Android app, also in the background",
+    "Songs start in about a second, like YouTube Music",
+    "Update the app from inside the app - no GitHub redirect",
+    "Download icon now resets correctly for the next song",
+    "Title line is now: duration, views, name"
+  ],
+  "note": "HOW TO RELEASE AN UPDATE: (1) changed anything inside android-app/ -> raise the android number by 1 AND bump DreamTuneApp/N in MainActivity.java. (2) changed only the website -> change the web text to anything new (e.g. today's date). (3) edit notes (max 5 lines). Then deploy. Everyone sees the Update popup; Skip hides it until the next version."
 }

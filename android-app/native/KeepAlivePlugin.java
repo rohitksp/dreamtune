@@ -18,6 +18,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileInputStream;
 import java.io.OutputStream;
+import java.io.InputStream;
+import androidx.core.content.FileProvider;
 
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
@@ -188,6 +190,7 @@ public class KeepAlivePlugin extends Plugin {
     }
 
     @PluginMethod public void nSetNext(PluginCall call) { NativePlayer.setNext(getContext(), meta(call)); call.resolve(); }
+    @PluginMethod public void nWarm(PluginCall call) { NativePlayer.warm(getContext()); call.resolve(); }
     @PluginMethod public void nPause(PluginCall call) { NativePlayer.withPlayer(p -> p.pause()); call.resolve(); }
     @PluginMethod public void nResume(PluginCall call) { NativePlayer.withPlayer(p -> p.play()); call.resolve(); }
     @PluginMethod public void nStop(PluginCall call) { NativePlayer.stop(); call.resolve(); }
@@ -229,25 +232,162 @@ public class KeepAlivePlugin extends Plugin {
         call.resolve(r);
     }
 
-    /** download a song (audio file) and put a copy into the phone's Music/DreamTune folder */
+    /* ---------- downloads with live progress ----------
+       nDownload starts the job and answers at once. The web app then asks nDlState every half second
+       and shows 1%, 2% ... 100% (also for 1-2 hour podcasts, which download in the background). */
+    static final class Job {
+        volatile String state = "run";          // run | done | error
+        volatile long done = 0, total = -1;
+        volatile int phase = 0;                  // 0 = downloading, 1 = copying into Music/DreamTune
+        volatile String uri = "", err = "";
+        volatile boolean cancel = false;
+    }
+    private static final java.util.concurrent.ConcurrentHashMap<String, Job> JOBS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ExecutorService DL_POOL = java.util.concurrent.Executors.newFixedThreadPool(2);
+
     @PluginMethod
     public void nDownload(final PluginCall call) {
         final NativePlayer.Meta m = meta(call);
-        NativePlayer.pool.execute(() -> {
+        if (m.id.isEmpty()) { call.reject("no id"); return; }
+        Job old = JOBS.get(m.id);
+        if (old != null && "run".equals(old.state)) {            // already running: just keep watching it
+            JSObject r = new JSObject(); r.put("started", true); call.resolve(r); return;
+        }
+        final Job job = new Job();
+        JOBS.put(m.id, job);
+        DL_POOL.execute(() -> {
             try {
-                File f = YtAudio.ensureFile(getContext(), m.id, null);
+                File f = YtAudio.ensureFile(getContext(), m.id, () -> job.cancel, (done, total) -> { job.done = done; job.total = total; });
+                if (job.cancel) throw new Exception("cancelled");
+                job.phase = 1;
                 String name = m.title.replaceAll("[\\\\/:*?\"<>|]", " ").trim();
                 if (m.artist != null && !m.artist.isEmpty()) name += " - " + m.artist.replaceAll("[\\\\/:*?\"<>|]", " ").trim();
                 if (name.length() > 90) name = name.substring(0, 90);
-                String uri = copyToMusic(f, name + ".m4a", m.title, m.artist);
-                JSObject r = new JSObject();
-                r.put("uri", uri);
-                call.resolve(r);
+                job.uri = copyToMusic(f, name + ".m4a", m.title, m.artist);
+                job.state = "done";
             } catch (Exception e) {
-                call.reject(String.valueOf(e.getMessage()));
+                job.err = String.valueOf(e.getMessage());
+                job.state = "error";
             }
         });
+        JSObject r = new JSObject(); r.put("started", true);
+        call.resolve(r);
     }
+
+    @PluginMethod
+    public void nDlState(PluginCall call) {
+        Job j = JOBS.get(call.getString("id", ""));
+        JSObject r = new JSObject();
+        if (j == null) { r.put("state", "none"); call.resolve(r); return; }
+        r.put("state", j.state);
+        r.put("done", j.done);
+        r.put("total", j.total);
+        int pct = j.total > 0 ? (int) Math.min(100, j.done * 100 / j.total) : 0;
+        if (j.phase == 1) pct = 100;
+        r.put("pct", pct);
+        r.put("phase", j.phase);
+        r.put("uri", j.uri);
+        r.put("err", j.err);
+        call.resolve(r);
+        if (!"run".equals(j.state)) JOBS.remove(call.getString("id", ""), j);      // result delivered
+    }
+
+    @PluginMethod
+    public void nDlCancel(PluginCall call) {
+        Job j = JOBS.get(call.getString("id", ""));
+        if (j != null) j.cancel = true;
+        call.resolve();
+    }
+
+    /* ---------- update the app from inside the app (no browser, no GitHub page) ----------
+       nUpdateStart downloads the new APK in the background, nUpdateState reports the percentage,
+       nUpdateInstall opens Android's installer for it. Your data stays (same signing key). */
+    private static volatile Job updJob = null;
+    private File updFile() { File d = new File(getContext().getCacheDir(), "update"); d.mkdirs(); return new File(d, "DreamTune.apk"); }
+
+    @PluginMethod
+    public void nUpdateStart(final PluginCall call) {
+        final String url = call.getString("url", "");
+        if (url.isEmpty()) { call.reject("no url"); return; }
+        Job old = updJob;
+        if (old != null && "run".equals(old.state)) { call.resolve(); return; }
+        final Job job = new Job();
+        updJob = job;
+        DL_POOL.execute(() -> {
+            File out = updFile();
+            File tmp = new File(out.getParentFile(), "DreamTune.apk.part");
+            try {
+                YtAudio.init();
+                okhttp3.OkHttpClient c = YtAudio.http.newBuilder().readTimeout(60, java.util.concurrent.TimeUnit.SECONDS).build();
+                okhttp3.Request rq = new okhttp3.Request.Builder().url(url).header("User-Agent", "DreamTune-Updater").build();
+                long len;
+                try (okhttp3.Response r = c.newCall(rq).execute()) {
+                    if (!r.isSuccessful() || r.body() == null) throw new Exception("download HTTP " + r.code() + " - is the new APK published yet?");
+                    len = r.body().contentLength();
+                    job.total = len;
+                    try (InputStream in = r.body().byteStream(); java.io.FileOutputStream o = new java.io.FileOutputStream(tmp)) {
+                        byte[] buf = new byte[64 * 1024];
+                        int n;
+                        while ((n = in.read(buf)) > 0) {
+                            if (job.cancel) throw new Exception("cancelled");
+                            o.write(buf, 0, n);
+                            job.done += n;
+                        }
+                    }
+                }
+                if (len > 0 && tmp.length() != len) throw new Exception("update file incomplete");
+                if (tmp.length() < 1024 * 1024) throw new Exception("update file is not an app");
+                out.delete();
+                if (!tmp.renameTo(out)) throw new Exception("could not save the update");
+                job.state = "done";
+            } catch (Exception e) {
+                tmp.delete();
+                job.err = String.valueOf(e.getMessage());
+                job.state = "error";
+            }
+        });
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void nUpdateState(PluginCall call) {
+        Job j = updJob;
+        JSObject r = new JSObject();
+        if (j == null) { r.put("state", updFile().exists() ? "done" : "none"); call.resolve(r); return; }
+        r.put("state", j.state);
+        r.put("pct", j.total > 0 ? (int) Math.min(100, j.done * 100 / j.total) : 0);
+        r.put("err", j.err);
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void nUpdateInstall(PluginCall call) {
+        try {
+            File apk = updFile();
+            if (!apk.exists()) { call.reject("update file missing"); return; }
+            Context ctx = getContext();
+            JSObject r = new JSObject();
+            if (Build.VERSION.SDK_INT >= 26 && !ctx.getPackageManager().canRequestPackageInstalls()) {
+                // Android asks once: "allow DreamTune to install apps"
+                Intent s = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + ctx.getPackageName()));
+                s.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                ctx.startActivity(s);
+                r.put("needPermission", true);
+                call.resolve(r);
+                return;
+            }
+            Uri u = FileProvider.getUriForFile(ctx, ctx.getPackageName() + ".fileprovider", apk);
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setDataAndType(u, "application/vnd.android.package-archive");
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(i);
+            r.put("needPermission", false);
+            call.resolve(r);
+        } catch (Exception e) {
+            call.reject(String.valueOf(e.getMessage()));
+        }
+    }
+
 
     private synchronized String copyToMusic(File src, String name, String title, String artist) throws Exception {
         try {

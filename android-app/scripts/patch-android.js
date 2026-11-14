@@ -2,7 +2,7 @@
 const fs = require('fs'), path = require('path');
 const pkgDir = path.join('android', 'app', 'src', 'main', 'java', 'com', 'rohit', 'dreamtune', 'app');
 fs.mkdirSync(pkgDir, { recursive: true });
-['KeepAliveService.java', 'KeepAlivePlugin.java', 'MainActivity.java', 'PlayerService.java', 'NativePlayer.java', 'YtAudio.java', 'AudioFetch.java']
+['KeepAliveService.java', 'KeepAlivePlugin.java', 'MainActivity.java', 'PlayerService.java', 'NativePlayer.java', 'YtAudio.java', 'AudioFetch.java', 'YtStream.java']
   .forEach(f => fs.copyFileSync(path.join('native', f), path.join(pkgDir, f)));
 
 // ---- manifest: permissions + services
@@ -10,7 +10,7 @@ const mf = path.join('android', 'app', 'src', 'main', 'AndroidManifest.xml');
 let x = fs.readFileSync(mf, 'utf8');
 const perms = [
   'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK', 'android.permission.WAKE_LOCK',
-  'android.permission.POST_NOTIFICATIONS', 'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'
+  'android.permission.POST_NOTIFICATIONS', 'android.permission.ACCESS_WIFI_STATE', 'android.permission.REQUEST_INSTALL_PACKAGES', 'android.permission.ACCESS_NETWORK_STATE', 'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'
 ].filter(p => !x.includes(p)).map(p => '    <uses-permission android:name="' + p + '" />').join('\n');
 x = x.replace('<application', perms + '\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />\n    <application');
 x = x.replace('</application>',
@@ -19,6 +19,13 @@ x = x.replace('</application>',
   '        <intent-filter><action android:name="androidx.media3.session.MediaSessionService" /></intent-filter>\n' +
   '    </service>\n    </application>');
 fs.writeFileSync(mf, x);
+
+// ---- file sharing paths, so Android's installer can open the downloaded update (APK) from the app cache
+const xmlDir = path.join('android', 'app', 'src', 'main', 'res', 'xml');
+fs.mkdirSync(xmlDir, { recursive: true });
+fs.writeFileSync(path.join(xmlDir, 'file_paths.xml'),
+  '<?xml version="1.0" encoding="utf-8"?>\n<paths xmlns:android="http://schemas.android.com/apk/res/android">\n' +
+  '    <external-path name="my_images" path="." />\n    <cache-path name="my_cache_images" path="." />\n    <files-path name="dt_files" path="." />\n</paths>\n');
 
 // ---- gradle: JitPack (NewPipe Extractor), Media3 player, OkHttp, Java desugaring
 const rootGradle = path.join('android', 'build.gradle');
@@ -43,6 +50,7 @@ android {
 }
 dependencies {
     implementation 'androidx.media3:media3-exoplayer:1.4.1'
+    implementation 'androidx.media3:media3-datasource:1.4.1'
     implementation 'androidx.media3:media3-session:1.4.1'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.5'
