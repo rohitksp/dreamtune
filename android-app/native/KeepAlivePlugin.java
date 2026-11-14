@@ -229,24 +229,71 @@ public class KeepAlivePlugin extends Plugin {
         call.resolve(r);
     }
 
-    /** download a song (audio file) and put a copy into the phone's Music/DreamTune folder */
+    /* ---------- downloads with live progress ----------
+       nDownload starts the job and answers at once. The web app then asks nDlState every half second
+       and shows 1%, 2% ... 100% (also for 1-2 hour podcasts, which download in the background). */
+    static final class Job {
+        volatile String state = "run";          // run | done | error
+        volatile long done = 0, total = -1;
+        volatile int phase = 0;                  // 0 = downloading, 1 = copying into Music/DreamTune
+        volatile String uri = "", err = "";
+        volatile boolean cancel = false;
+    }
+    private static final java.util.concurrent.ConcurrentHashMap<String, Job> JOBS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ExecutorService DL_POOL = java.util.concurrent.Executors.newFixedThreadPool(2);
+
     @PluginMethod
     public void nDownload(final PluginCall call) {
         final NativePlayer.Meta m = meta(call);
-        NativePlayer.pool.execute(() -> {
+        if (m.id.isEmpty()) { call.reject("no id"); return; }
+        Job old = JOBS.get(m.id);
+        if (old != null && "run".equals(old.state)) {            // already running: just keep watching it
+            JSObject r = new JSObject(); r.put("started", true); call.resolve(r); return;
+        }
+        final Job job = new Job();
+        JOBS.put(m.id, job);
+        DL_POOL.execute(() -> {
             try {
-                File f = YtAudio.ensureFile(getContext(), m.id, null);
+                File f = YtAudio.ensureFile(getContext(), m.id, () -> job.cancel, (done, total) -> { job.done = done; job.total = total; });
+                if (job.cancel) throw new Exception("cancelled");
+                job.phase = 1;
                 String name = m.title.replaceAll("[\\\\/:*?\"<>|]", " ").trim();
                 if (m.artist != null && !m.artist.isEmpty()) name += " - " + m.artist.replaceAll("[\\\\/:*?\"<>|]", " ").trim();
                 if (name.length() > 90) name = name.substring(0, 90);
-                String uri = copyToMusic(f, name + ".m4a", m.title, m.artist);
-                JSObject r = new JSObject();
-                r.put("uri", uri);
-                call.resolve(r);
+                job.uri = copyToMusic(f, name + ".m4a", m.title, m.artist);
+                job.state = "done";
             } catch (Exception e) {
-                call.reject(String.valueOf(e.getMessage()));
+                job.err = String.valueOf(e.getMessage());
+                job.state = "error";
             }
         });
+        JSObject r = new JSObject(); r.put("started", true);
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void nDlState(PluginCall call) {
+        Job j = JOBS.get(call.getString("id", ""));
+        JSObject r = new JSObject();
+        if (j == null) { r.put("state", "none"); call.resolve(r); return; }
+        r.put("state", j.state);
+        r.put("done", j.done);
+        r.put("total", j.total);
+        int pct = j.total > 0 ? (int) Math.min(100, j.done * 100 / j.total) : 0;
+        if (j.phase == 1) pct = 100;
+        r.put("pct", pct);
+        r.put("phase", j.phase);
+        r.put("uri", j.uri);
+        r.put("err", j.err);
+        call.resolve(r);
+        if (!"run".equals(j.state)) JOBS.remove(call.getString("id", ""), j);      // result delivered
+    }
+
+    @PluginMethod
+    public void nDlCancel(PluginCall call) {
+        Job j = JOBS.get(call.getString("id", ""));
+        if (j != null) j.cancel = true;
+        call.resolve();
     }
 
     private synchronized String copyToMusic(File src, String name, String title, String artist) throws Exception {

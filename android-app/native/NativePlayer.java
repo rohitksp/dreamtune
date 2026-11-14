@@ -18,6 +18,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /** Glue between the web app (through KeepAlivePlugin) and the native player. */
+@androidx.media3.common.util.UnstableApi
 final class NativePlayer {
     interface Cb { void done(boolean ok, String err); }
 
@@ -69,22 +70,25 @@ final class NativePlayer {
         lastErr = code == null ? "" : code;
         final Meta m = curMeta;
         final PlayerService s = PlayerService.instance;
-        // add what the saved file looks like, so an error message tells us the reason
-        boolean bad = false;
-        if (m != null && s != null) {
-            File cf = new File(new File(s.getCacheDir(), "yt"), m.id + ".m4a");
-            if (cf.exists()) { bad = !AudioFetch.valid(cf); lastErr += " [" + (cf.length() / 1024) + " KB" + (bad ? ", incomplete file" : ", file ok") + "]"; }
-        }
-        if (m == null || s == null || s.exo == null || retry >= 2) { giveUp(); return; }
+        if (m == null || s == null || s.exo == null || retry >= 3) { giveUp(); return; }
         final int attempt = ++retry, my = token;
-        final boolean redo = bad;
         final long at = Math.max(0, s.exo.getCurrentPosition());
+        // how long is this audio? (long podcasts are never downloaded as a whole file, they are only re-streamed)
+        YtStream.Link old = YtStream.cached(m.id);
+        final boolean longAudio = old != null && old.lenSec > YtStream.LONG_SECONDS;
         pool.execute(() -> {
             try {
-                if (attempt == 2 || redo) { m.src = null; new File(new File(s.getCacheDir(), "yt"), m.id + ".m4a").delete(); }
-                final Uri src = m.src != null ? m.src : resolveSource(s, m, () -> token != my);
+                YtStream.forget(m.id);                                  // the link may have expired: ask for a new one
+                Uri src;
+                if (attempt == 3 && !longAudio) {                       // last try for a normal song: download the whole file
+                    new File(new File(s.getCacheDir(), "yt"), m.id + ".m4a").delete();
+                    src = Uri.fromFile(YtAudio.ensureFile(s, m.id, () -> token != my));
+                } else {
+                    src = sourceFor(s, m);
+                }
                 m.src = src;
-                main.post(() -> { if (token == my) startItem(src, m, at); });
+                final Uri fsrc = src;
+                main.post(() -> { if (token == my) startItem(fsrc, m, at); });
             } catch (Exception e) {
                 main.post(() -> giveUp());
             }
@@ -97,15 +101,19 @@ final class NativePlayer {
         catch (Exception e) { return false; }
     }
 
-    private static Uri resolveSource(Context c, Meta m, java.util.function.BooleanSupplier cancelled) throws Exception {
+    /** Where to play from. Never waits for a download:
+     *  1) a song the user downloaded   2) a complete saved copy   3) live streaming (starts in about a second) */
+    private static Uri sourceFor(Context c, Meta m) {
         if (readable(c, m.uri)) return Uri.parse(m.uri);
-        return Uri.fromFile(YtAudio.ensureFile(c, m.id, cancelled));
+        File cf = new File(new File(c.getCacheDir(), "yt"), m.id + ".m4a");
+        if (cf.exists() && AudioFetch.valid(cf)) { cf.setLastModified(System.currentTimeMillis()); return Uri.fromFile(cf); }
+        return YtStream.uriFor(m.id);
     }
 
     private static MediaItem item(Uri src, Meta m) {
         MediaMetadata.Builder md = new MediaMetadata.Builder().setTitle(m.title).setArtist(m.artist);
         if (m.thumb != null && !m.thumb.isEmpty()) { try { md.setArtworkUri(Uri.parse(m.thumb)); } catch (Exception e) { } }
-        return new MediaItem.Builder().setUri(src).setMediaId(m.id).setMediaMetadata(md.build()).build();
+        return new MediaItem.Builder().setUri(src).setMediaId(m.id).setMimeType("audio/mp4").setMediaMetadata(md.build()).build();
     }
 
     // must run on the main thread
@@ -132,17 +140,16 @@ final class NativePlayer {
 
     static void play(final Context ctx, final Meta m, final Cb cb) {
         final int my = ++token;
-        next = null; retry = 0;
+        next = null; retry = 0; lastErr = "";
         main.post(() -> { PlayerService s = PlayerService.instance; if (s != null && s.exo != null) s.exo.pause(); });
         pool.execute(() -> {
             try {
-                Uri src = resolveSource(ctx, m, () -> token != my);
-                if (token != my) { cb.done(false, "cancelled"); return; }
                 if (!ensureService(ctx)) { cb.done(false, "player service did not start"); return; }
-                final Uri fsrc = src;
-                m.src = fsrc;
-                main.post(() -> { if (token == my) startItem(fsrc, m); });
-                cb.done(true, null);
+                if (token != my) { cb.done(false, "cancelled"); return; }
+                final Uri src = sourceFor(ctx, m);
+                m.src = src;
+                main.post(() -> { if (token == my) startItem(src, m); });
+                cb.done(true, null);                       // playback starts by itself as soon as the first bit of audio arrives
             } catch (Exception e) {
                 cb.done(false, String.valueOf(e.getMessage()));
             }
@@ -151,15 +158,16 @@ final class NativePlayer {
 
     static void setNext(final Context ctx, final Meta m) {
         next = m;
+        m.src = sourceFor(ctx, m);
         pool.execute(() -> {
-            try { m.src = resolveSource(ctx, m, () -> next != m); } catch (Exception e) { }
+            try { if (YtStream.SCHEME.equals(m.src.getScheme())) YtStream.find(m.id, false); } catch (Exception e) { }   // link ready = next song starts at once
         });
     }
 
     /** current song finished: if the next one is ready, start it here, even if the web page is asleep */
     static void onEnded() {
         Meta n = next;
-        if (n != null && n.src != null) {
+        if (n != null && n.src != null) {   // n.src is always set (a stream address needs no waiting)
             next = null; token++; retry = 0;
             advSeq++;
             startItem(n.src, n);

@@ -1016,6 +1016,48 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) { console.warn('browser save failed:', e); return false; }
     }
 
+    /* running downloads: shown at the top of Library > Downloads with a live percentage */
+    const dlActive = new Map();      // id -> { track, pct }
+    const dlCancelled = new Set();
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    function renderActiveDownloads() {
+        const box = $('dl-active');
+        if (!box) return;
+        const key = [...dlActive.keys()].join(',');
+        if (box.dataset.key !== key) {                     // list changed: build the rows again
+            box.dataset.key = key;
+            box.innerHTML = [...dlActive.values()].map(d => `
+                <div class="dl-row" data-id="${escapeHtml(d.track.id)}">
+                    <img src="${escapeHtml(d.track.thumb || '')}" alt="">
+                    <div class="dl-info"><strong class="truncate">${escapeHtml(cleanTitle(d.track.title))}</strong><small></small><div class="dl-bar"><i></i></div></div>
+                    <span class="dl-pct"></span>
+                    <button class="icon-btn dl-cancel" data-id="${escapeHtml(d.track.id)}" aria-label="Cancel download"><span class="material-symbols-rounded">close</span></button>
+                </div>`).join('');
+        }
+        box.querySelectorAll('.dl-row').forEach(row => {   // only numbers change: update in place
+            const d = dlActive.get(row.dataset.id); if (!d) return;
+            const p = d.pct || 0, wait = p <= 0;
+            row.querySelector('small').textContent = d.finishing ? 'Saving to your phone...' : (wait ? 'Getting ready...' : 'Downloading ' + p + '%');
+            row.querySelector('.dl-bar').classList.toggle('wait', wait);
+            row.querySelector('.dl-bar i').style.width = wait ? '' : p + '%';
+            row.querySelector('.dl-pct').textContent = wait ? '' : p + '%';
+        });
+        box.querySelectorAll('.dl-cancel').forEach(btn => { btn.onclick = () => cancelDownload(btn.dataset.id); });
+    }
+    function cancelDownload(id) {
+        dlCancelled.add(id); AC.keep.delete(id);
+        if (IS_NATIVE) nat('KeepAlive', 'nDlCancel', { id }).catch(() => {});
+        showToast('Download cancelled', 2000);
+    }
+    function dlSetPct(id, pct, finishing) {
+        const d = dlActive.get(id); if (!d) return;
+        const p = Math.max(0, Math.min(100, Math.floor(pct)));
+        if (d.pct === p && !!d.finishing === !!finishing) return;
+        d.pct = p; d.finishing = !!finishing;
+        dlPct.set(id, p); updateDownloadButtons(); renderActiveDownloads();
+    }
+
     async function downloadSong(track) {
         if (!track || track.isLocal) { showToast('Phone songs are already on your device'); return; }
         if (!state.db) { showToast('Please wait - library is loading'); return; }
@@ -1024,37 +1066,66 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!IS_NATIVE && d && d.blob && d.blob.size) { saveToComputer(d.blob, track) ? showToast('Saved to your computer (Downloads folder)', 3000) : showToast('Could not save the file - try again'); return; }
             showToast('Already downloaded'); return;
         }
-        if (state.dlBusy.has(track.id)) { showToast('Download in progress...'); return; }
+        if (state.dlBusy.has(track.id)) { showToast('Already downloading - see Library > Downloads'); return; }
         if (!navigator.onLine) { showToast('Connect to the internet to download'); return; }
         if (!isYTid(track.id)) { showToast('This song cannot be downloaded'); return; }
-        state.dlBusy.add(track.id); updateDownloadButtons();
-        showToast('Downloading "' + cleanTitle(track.title) + '"...', 2500);
+        state.dlBusy.add(track.id); dlCancelled.delete(track.id);
+        dlActive.set(track.id, { track, pct: 0 });
+        updateDownloadButtons(); renderActiveDownloads();
+        refreshLibrary().catch(() => {});                 // the song appears in Library > Downloads right now, with its progress
+        showToast('Downloading "' + cleanTitle(track.title) + '" - watch it in Library > Downloads', 3200);
         try {
             let blob = null, onPhone = false, onPC = false, uri = '';
             if (IS_NATIVE && NP.ok) {      // the phone downloads the song itself and puts it in Music/DreamTune
                 try {
                     await nat('KeepAlive', 'askStorage');
                     const r = await nat('KeepAlive', 'nDownload', npMeta(track));
-                    uri = (r && r.uri) || ''; onPhone = !!uri;
-                } catch (e) { console.warn('native download failed:', e && e.message); }
+                    if (r && r.uri) { uri = r.uri; }                 // older app version: the answer came at the end
+                    else {                                           // new app version: runs in the background, we watch the percentage
+                        let quiet = 0;
+                        for (;;) {
+                            await sleep(450);
+                            if (dlCancelled.has(track.id)) throw new Error('cancelled');
+                            let st; try { st = await nat('KeepAlive', 'nDlState', { id: track.id }); } catch (e) { if (++quiet > 20) throw e; continue; }
+                            quiet = 0;
+                            if (st.state === 'run') { dlSetPct(track.id, Math.min(99, st.pct || 0), st.phase === 1); continue; }
+                            if (st.state === 'done') { uri = st.uri || ''; break; }
+                            throw new Error(st.err || 'download failed');
+                        }
+                    }
+                    onPhone = !!uri;
+                } catch (e) {
+                    if (e && e.message === 'cancelled') throw e;
+                    console.warn('native download failed:', e && e.message);
+                }
             }
             if (!uri) {
                 AC.keep.add(track.id);
-                blob = await ensureAudio(track.id);
+                const watch = setInterval(() => { const p = dlPct.get(track.id); if (p != null) dlSetPct(track.id, p); }, 400);
+                try { blob = await ensureAudio(track.id); } finally { clearInterval(watch); }
+                if (dlCancelled.has(track.id)) throw new Error('cancelled');
                 if (!blob || !blob.size) throw new Error('empty file');
+                dlSetPct(track.id, 99, true);
                 try { onPhone = await saveToPhone(blob, track); } catch (e) { console.warn('save to phone failed:', e); }
                 if (!IS_NATIVE && blob) onPC = saveToComputer(blob, track);       // PC: also a real file in your Downloads folder
             }
+            dlSetPct(track.id, 100, false);
             await dbPut('downloads', { id: track.id, title: track.title, artist: track.artist, thumb: track.thumb || '', duration: track.duration || '',
                                        views: track.views || 0, blob, uri, size: blob ? blob.size : 0, onPhone, savedAt: Date.now() });
+            await sleep(500);                                  // let the bar reach 100% before the row turns into a normal song
+            dlActive.delete(track.id); dlPct.delete(track.id);
             await refreshLibrary();
             showToast(onPhone ? 'Downloaded - saved in Music/DreamTune on your phone' : onPC ? 'Downloaded - saved to your computer (Downloads folder)' : 'Downloaded - find it in Library > Downloads', 3500);
         } catch (err) {
-            console.error('Download failed:', err);
-            showToast(navigator.onLine ? 'Could not download this song right now - please try again in a moment' : 'Download failed - check your internet and try again', 4500);
+            if (err && err.message === 'cancelled') { /* user cancelled: nothing to report */ }
+            else {
+                console.error('Download failed:', err);
+                showToast(navigator.onLine ? 'Could not download this song right now - please try again in a moment' : 'Download failed - check your internet and try again', 4500);
+            }
         } finally {
-            AC.keep.delete(track.id); dlPct.delete(track.id);
-            state.dlBusy.delete(track.id); updateDownloadButtons();
+            AC.keep.delete(track.id); dlPct.delete(track.id); dlActive.delete(track.id); dlCancelled.delete(track.id);
+            state.dlBusy.delete(track.id); updateDownloadButtons(); renderActiveDownloads();
+            refreshLibrary().catch(() => {});
         }
     }
 
@@ -1069,6 +1140,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const p = Math.min(99, Math.floor(f * 100));
         if (dlPct.get(id) === p) return;
         dlPct.set(id, p); updateDownloadButtons();
+        if (dlActive.has(id)) { const d = dlActive.get(id); d.pct = p; renderActiveDownloads(); }
     }
     function updateDownloadButtons() {
         document.querySelectorAll('.dl-btn').forEach(b => {
@@ -1250,7 +1322,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function downloadsCard() {
         const l = dlList(), th = l.slice(0, 3).filter(s => s.thumb).map(s => `<img src="${escapeHtml(s.thumb)}" alt="">`).join('');
         return `<div class="liked-card" id="downloads-card"><div class="liked-art"><span class="material-symbols-rounded">download_done</span></div>
-            <div class="liked-text"><h3>Downloads</h3><p>${l.length} song${l.length === 1 ? '' : 's'} ${IS_NATIVE ? 'on your phone' : 'saved offline'}</p></div><div class="liked-thumbs">${th}</div></div>`;
+            <div class="liked-text"><h3>Downloads</h3><p>${l.length} song${l.length === 1 ? '' : 's'} ${IS_NATIVE ? 'on your phone' : 'saved offline'}${dlActive.size ? ' \u2022 ' + dlActive.size + ' downloading' : ''}</p></div><div class="liked-thumbs">${th}</div></div>`;
     }
 
     function renderDownloadsDetail(root) {
@@ -1271,7 +1343,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button class="btn-glass" id="shuffle-play-btn"><span class="material-symbols-rounded">shuffle</span><span>Shuffle</span></button>
                 </div>` : ''}
             </div>
+            <div id="dl-active" class="dl-active"></div>
             <div id="playlist-songs" class="song-list"></div>`;
+        renderActiveDownloads();
         $('back-to-playlists').addEventListener('click', () => { state.openPlaylistId = null; renderWishlistView(); });
         const pa = $('play-all-btn'); if (pa) pa.addEventListener('click', () => { setShuffle(false); playTrack(songs[0], songs); });
         const sp = $('shuffle-play-btn'); if (sp) sp.addEventListener('click', () => { setShuffle(true); playTrack(songs[Math.floor(Math.random() * songs.length)], songs); });
@@ -1466,15 +1540,102 @@ document.addEventListener('DOMContentLoaded', () => {
         const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
         const standalone = window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
         if (isIOS && !standalone && !IS_NATIVE) $('ios-box').classList.remove('hidden');
-        if (!IS_NATIVE) return;
+
         const m = ua.match(/DreamTuneApp\/(\d+)/);
-        const mine = m ? Number(m[1]) : 1;                 // apps built before this feature count as version 1
-        fetch('/version.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.json()).then(v => {
-            if (!v || Number(v.android) <= mine) return;
-            $('update-box').classList.remove('hidden');
-            $('update-btn').onclick = () => window.open(v.url, '_blank');
-            if (!sessionStorage.getItem('dt_update_toast')) { sessionStorage.setItem('dt_update_toast', '1'); showToast('A new app version is available - open your profile to update', 5000); }
-        }).catch(() => {});
+        const mine = IS_NATIVE ? (m ? Number(m[1]) : 1) : 0;      // apps built before this feature count as version 1
+        const U = { loadedWeb: null, latest: null, popup: null };
+        const skipKey = () => { try { return localStorage.getItem('dt_upd_skip') || ''; } catch (e) { return ''; } };
+        const keyOf = (v) => 'n' + v.android + '|w' + (v.web || '');
+
+        // appUpdate = the installed Android app is older (needs the new APK); webUpdate = this open page is older than the website
+        function status(v) {
+            const appUpdate = IS_NATIVE && Number(v.android) > mine;
+            const webUpdate = !!(U.loadedWeb && v.web && String(v.web) !== U.loadedWeb);
+            return { appUpdate, webUpdate, any: appUpdate || webUpdate };
+        }
+        function openApkLink(v) { window.open(v.apk || v.url, '_blank'); }
+        function paintProfile(v) {
+            const st = v ? status(v) : null;
+            const sub = $('update-status'), badge = $('update-badge'), box = $('update-box');
+            const ver = (U.loadedWeb ? 'Version ' + U.loadedWeb : 'DreamTune') + (IS_NATIVE ? ' \u2022 app build ' + mine : '');
+            if (sub) sub.textContent = !v ? ver + ' \u2022 tap to check' : st.any ? 'New update is ready \u2022 tap to update' : ver + ' \u2022 up to date';
+            if (badge) badge.classList.toggle('hidden', !(st && st.any));
+            if (box) {
+                box.classList.toggle('hidden', !(st && st.appUpdate));
+                const b = $('update-btn'); if (b && v) b.onclick = () => openApkLink(v);
+            }
+        }
+
+        function closePopup() { if (U.popup) { U.popup.remove(); U.popup = null; } }
+        function showPopup(v) {
+            if (U.popup) return;
+            const st = status(v);
+            const notes = (Array.isArray(v.notes) ? v.notes : []).slice(0, 5);
+            const el = document.createElement('div');
+            el.className = 'upd-backdrop';
+            el.innerHTML = `<div class="upd-card" role="dialog" aria-modal="true" aria-label="Update available">
+                <div class="upd-icon"><span class="material-symbols-rounded">system_update</span></div>
+                <h3>New update is here!</h3>
+                <p class="upd-ver">${st.appUpdate ? 'A new DreamTune app is ready' : 'A new version of DreamTune is ready'}${v.web ? ' \u2022 ' + escapeHtml(String(v.web)) : ''}</p>
+                ${notes.length ? '<ul>' + notes.map(n => '<li>' + escapeHtml(String(n)) + '</li>').join('') + '</ul>' : '<p class="upd-ver" style="margin-bottom:16px">Please update to get the latest features and fixes.</p>'}
+                <div class="upd-actions">
+                    <button type="button" class="btn-gradient" id="upd-now"><span class="material-symbols-rounded">download</span><span class="btn-label">${st.appUpdate ? 'Update now' : 'Update now (restart)'}</span></button>
+                    <button type="button" class="upd-skip" id="upd-skip">Skip for now</button>
+                </div></div>`;
+            document.body.appendChild(el);
+            U.popup = el;
+            $('upd-now').onclick = () => {
+                closePopup();
+                if (st.appUpdate) { openApkLink(v); showToast('Download the app, then open it to install - your data stays safe', 5000); }
+                else location.reload();
+            };
+            $('upd-skip').onclick = () => {
+                try { localStorage.setItem('dt_upd_skip', keyOf(v)); } catch (e) {}
+                closePopup();
+                showToast('You can update any time from your profile', 3000);
+            };
+        }
+
+        async function load() { const r = await fetch('/version.json?t=' + Date.now(), { cache: 'no-store' }); return r.json(); }
+
+        // 1) on start: remember which website version this page is, check for news, show the popup once the home page is up
+        load().then(v => {
+            U.loadedWeb = v && v.web ? String(v.web) : null;
+            U.latest = v;
+            paintProfile(v);
+            if (!v || !status(v).any || skipKey() === keyOf(v)) return;
+            let waited = 0;
+            const t = setInterval(() => {                    // wait until the person is inside the app (after login)
+                waited += 700;
+                if (state.user && !document.querySelector('.modal-backdrop:not(.hidden)')) { clearInterval(t); showPopup(v); }
+                else if (waited > 90000) clearInterval(t);
+            }, 700);
+        }).catch(() => { paintProfile(null); });
+
+        // 2) while the app stays open: look again when you come back to it, and every 20 minutes
+        let last = Date.now();
+        async function recheck() {
+            if (Date.now() - last < 60000) return; last = Date.now();
+            try {
+                const v = await load(); U.latest = v; paintProfile(v);
+                if (status(v).any && skipKey() !== keyOf(v) && state.user) showPopup(v);
+            } catch (e) {}
+        }
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) recheck(); });
+        setInterval(() => { if (!document.hidden) recheck(); }, 20 * 60 * 1000);
+
+        // 3) profile > "App updates": check by hand
+        const btn = $('check-update-btn');
+        if (btn) btn.addEventListener('click', async () => {
+            const sub = $('update-status'); if (sub) sub.textContent = 'Checking...';
+            try {
+                const v = await load(); U.latest = v;
+                if (!U.loadedWeb && v.web) U.loadedWeb = String(v.web);
+                paintProfile(v);
+                if (status(v).any) { closePopup(); showPopup(v); }
+                else showToast('You have the latest version \u2714', 2500);
+            } catch (e) { paintProfile(null); showToast('Could not check for updates - check your internet', 3000); }
+        });
     })();
 
     /* ---------------------------------------------------------------------
@@ -2054,9 +2215,9 @@ document.addEventListener('DOMContentLoaded', () => {
         state.loading = true; updatePlayButtons();
         npAskPerms();
         try {
-            // a long song can take a while to fetch, but it must never hang forever on "Loading":
-            // if the phone hasn't confirmed playback within 35s, treat it the same as a failure.
-            const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 35000));
+            // the phone now STREAMS the song (starts in ~1 s, any length), so this call only has to start the player.
+            // 20 s is just a safety net.
+            const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 20000));
             await Promise.race([nat('KeepAlive', 'nPlay', npMeta(track)), timeout]);
             if (token !== playToken) return;
             NP.fails = 0; applySpeed();
@@ -2066,7 +2227,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('native player failed:', e && e.message);
             if (e && e.message === 'cancelled') return;
             if (e && e.message === 'timeout') nat('KeepAlive', 'nStop').catch(() => {});   // stop it in case it finishes late, after we've already moved to the fallback player
-            NP.fails++; if (NP.fails >= 2) NP.ok = false;
+            NP.fails++; if (NP.fails >= 4) NP.ok = false;
             NP.active = false; state.engine = null;
             if (!navigator.onLine) { state.loading = false; updatePlayButtons(); showToast('Could not play this song'); return; }
             showToast('Switching player...', 1500);
@@ -2366,8 +2527,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updatePlayButtons() {
-        const icon = state.isPlaying ? 'pause' : (state.loading ? 'progress_activity' : 'play_arrow');
-        [elements.mainPlayBtn, elements.miniPlayBtn].forEach(b => { const sp = b.querySelector('span'); sp.textContent = icon; sp.classList.toggle('spin', icon === 'progress_activity'); });
+        // while the song is getting ready the play icon stays and a thin green ring turns around it
+        const icon = state.isPlaying ? 'pause' : 'play_arrow';
+        const preparing = !!state.loading && !state.isPlaying;
+        [elements.mainPlayBtn, elements.miniPlayBtn].forEach(b => { const sp = b.querySelector('span'); sp.textContent = icon; sp.classList.remove('spin'); b.classList.toggle('is-loading', preparing); });
         elements.fullPlayerOverlay.classList.toggle('playing', state.isPlaying);
         elements.app.classList.toggle('is-playing', state.isPlaying);
         keepAlive(state.isPlaying && state.engine === 'yt');
