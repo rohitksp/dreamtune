@@ -53,8 +53,8 @@ dependencies {
 ag += `
 android {
     defaultConfig {
-        versionCode (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
-        versionName '1.0.' + (System.getenv('GITHUB_RUN_NUMBER') ?: '1')
+        versionCode = Integer.parseInt(System.getenv('GITHUB_RUN_NUMBER') ?: '1')
+        versionName = '1.0.' + (System.getenv('GITHUB_RUN_NUMBER') ?: '1')
     }
     if (System.getenv('DT_KEYSTORE')) {
         signingConfigs {
