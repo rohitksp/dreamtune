@@ -1831,6 +1831,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const SIZE = 1024 * 1024, parts = [];
         let link = await nativeLink(id), start = 0;
         const totalBytes = link.total;
+        if (!Number.isFinite(totalBytes) || totalBytes <= 0) throw new Error('YouTube did not provide the audio file size');
         if (link.total > 220 * 1024 * 1024) { const e = new Error('file exceeds the 220 MB safety limit'); e.tooLong = true; throw e; }
         while (start < link.total) {
             if (!AC.want.has(id) && !AC.keep.has(id)) throw new Error('cancelled');      // you skipped away
@@ -1864,7 +1865,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function fetchAudio(id) {
-        if (IS_NATIVE) { try { return await fetchAudioNative(id); } catch (e) { if (e.message === 'cancelled' || e.tooLong) throw e; console.warn('on-phone download failed:', e.message); } }
         const SIZE = 3 * 1024 * 1024;
         const dl = AC.keep.has(id);                                   // true while you are downloading (long files are fine then)
         const LIMIT = 220 * 1024 * 1024;      // allow long tracks for both playback and offline downloads
@@ -2135,7 +2135,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const dlRec = state.downloads.get(track.id);
         const blob = track.audioBlob || (saved && saved.audioBlob) || (dlRec && dlRec.blob);
         const adopt = NP.adopt === track.id; NP.adopt = null;
-        const viaNative = IS_NATIVE && NP.ok && !track.isLocal && !blob && ((dlRec && dlRec.uri) || (isYTid(track.id) && navigator.onLine));
+        const viaNative = IS_NATIVE && NP.ok && !track.isLocal && !blob && !!(dlRec && dlRec.uri); // use the same chunked WebView audio path for online tracks; native playback is only for legacy phone-file downloads
 
         if (!track.isLocal && !blob && !viaNative && !navigator.onLine) {
             showToast('You are offline and this song is not downloaded');

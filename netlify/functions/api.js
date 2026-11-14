@@ -178,7 +178,21 @@ async function streamChunk(id, start, size) {
         const r = await fetch(`${a.url}&range=${start}-${end}`, { headers: { 'User-Agent': a.ua, 'Range': `bytes=${start}-${end}` } });
         if (r.status === 200 || r.status === 206) {
             let buf = Buffer.from(await r.arrayBuffer());
-            if (buf.length > end - start + 1) buf = buf.subarray(0, end - start + 1);      // server ignored the range: keep only what we asked for
+            const asked = end - start + 1;
+            const contentRange = r.headers.get('content-range') || '';
+            const match = contentRange.match(/bytes\s+(\d+)-(\d+)\/(\d+|\*)/i);
+            if (match) {
+                const actualStart = Number(match[1]);
+                if (actualStart !== start) throw new Error(`YouTube returned byte ${actualStart}; expected ${start}`);
+                if (match[3] !== '*') a.total = Number(match[3]);
+                if (buf.length > asked) buf = buf.subarray(0, asked);
+            } else if (buf.length > asked) {
+                // Some YouTube responses ignore the Range header and return the full file.
+                // Slice at the requested offset; taking the first bytes corrupts every later chunk.
+                if (buf.length < start + asked) throw new Error('YouTube returned an incomplete full-file response');
+                buf = buf.subarray(start, start + asked);
+            }
+            if (!buf.length) throw new Error(`YouTube returned an empty audio range at ${start}`);
             return { total: a.total, buf };
         }
         linkCache.delete(id);                                                               // link expired / refused: ask again once
