@@ -1374,3 +1374,13 @@ html:not(.icons-ok) .material-symbols-rounded { color: transparent !important; -
 /* ---- download progress badge ---- */
 .dl-btn { position: relative; }
 .dl-btn[data-pct]::after { content: attr(data-pct); position: absolute; right: -2px; bottom: -2px; padding: 0 4px; font-size: 10px; font-weight: 800; line-height: 15px; border-radius: 8px; background: var(--accent); color: #fff; }
+
+/* Download queue shown at the top of Library > Downloads */
+.dl-pending-list:empty { display: none; }
+.dl-pending-list { display: grid; gap: 10px; padding: 12px 14px; margin: 0 0 10px; border: 1px solid var(--line, rgba(255,255,255,.1)); border-radius: 14px; background: rgba(255,255,255,.035); }
+.dl-pending-row { display: grid; gap: 7px; }
+.dl-pending-copy { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
+.dl-pending-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-pending-copy span { flex: 0 0 auto; opacity: .72; }
+.dl-pending-track { height: 5px; overflow: hidden; border-radius: 8px; background: rgba(255,255,255,.14); }
+.dl-pending-track i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s ease; }

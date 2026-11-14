@@ -1027,17 +1027,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.dlBusy.has(track.id)) { showToast('Download in progress...'); return; }
         if (!navigator.onLine) { showToast('Connect to the internet to download'); return; }
         if (!isYTid(track.id)) { showToast('This song cannot be downloaded'); return; }
-        state.dlBusy.add(track.id); updateDownloadButtons();
+        state.dlBusy.add(track.id); dlPct.set(track.id, 0); dlPending.set(track.id, track); updateDownloadButtons();
+        if (state.openPlaylistId === DL_ID) refreshPendingDownloadsUI();
         showToast('Downloading "' + cleanTitle(track.title) + '"...', 2500);
         try {
             let blob = null, onPhone = false, onPC = false, uri = '';
-            if (IS_NATIVE && NP.ok) {      // the phone downloads the song itself and puts it in Music/DreamTune
-                try {
-                    await nat('KeepAlive', 'askStorage');
-                    const r = await nat('KeepAlive', 'nDownload', npMeta(track));
-                    uri = (r && r.uri) || ''; onPhone = !!uri;
-                } catch (e) { console.warn('native download failed:', e && e.message); }
-            }
+            // Use the same chunked downloader on Android and web. This avoids the
+            // native one-shot download path, which gave no progress and failed on large files.
             if (!uri) {
                 AC.keep.add(track.id);
                 blob = await ensureAudio(track.id);
@@ -1053,8 +1049,9 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Download failed:', err);
             showToast(navigator.onLine ? 'Could not download this song right now - please try again in a moment' : 'Download failed - check your internet and try again', 4500);
         } finally {
-            AC.keep.delete(track.id); dlPct.delete(track.id);
+            AC.keep.delete(track.id); dlPct.delete(track.id); dlPending.delete(track.id);
             state.dlBusy.delete(track.id); updateDownloadButtons();
+            if (state.openPlaylistId === DL_ID) { await refreshLibrary(); }
         }
     }
 
@@ -1068,7 +1065,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function setDlProgress(id, f) {
         const p = Math.min(99, Math.floor(f * 100));
         if (dlPct.get(id) === p) return;
-        dlPct.set(id, p); updateDownloadButtons();
+        dlPct.set(id, p); updateDownloadButtons(); refreshPendingDownloadsUI();
     }
     function updateDownloadButtons() {
         document.querySelectorAll('.dl-btn').forEach(b => {
@@ -1245,7 +1242,21 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="liked-text"><h3>Liked Songs</h3><p>${ids.length} song${ids.length === 1 ? '' : 's'} you loved</p></div><div class="liked-thumbs">${th}</div></div>`;
     }
 
+    const dlPending = new Map();
     function dlList() { return [...state.downloads.values()].sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)); }
+    function pendingDownloadsHTML() {
+        return [...dlPending.values()].map(t => {
+            const pct = dlPct.get(t.id) || 0;
+            return `<div class="dl-pending-row" data-pending-id="${escapeHtml(t.id)}">
+                <div class="dl-pending-copy"><strong>${escapeHtml(cleanTitle(t.title))}</strong><span>${pct}% · Downloading</span></div>
+                <div class="dl-pending-track"><i style="width:${pct}%"></i></div>
+            </div>`;
+        }).join('');
+    }
+    function refreshPendingDownloadsUI() {
+        const el = $('pending-downloads');
+        if (el) el.innerHTML = pendingDownloadsHTML();
+    }
 
     function downloadsCard() {
         const l = dlList(), th = l.slice(0, 3).filter(s => s.thumb).map(s => `<img src="${escapeHtml(s.thumb)}" alt="">`).join('');
@@ -1271,7 +1282,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button class="btn-glass" id="shuffle-play-btn"><span class="material-symbols-rounded">shuffle</span><span>Shuffle</span></button>
                 </div>` : ''}
             </div>
-            <div id="playlist-songs" class="song-list"></div>`;
+            <div id="pending-downloads" class="dl-pending-list">${pendingDownloadsHTML()}</div><div id="playlist-songs" class="song-list"></div>`;
         $('back-to-playlists').addEventListener('click', () => { state.openPlaylistId = null; renderWishlistView(); });
         const pa = $('play-all-btn'); if (pa) pa.addEventListener('click', () => { setShuffle(false); playTrack(songs[0], songs); });
         const sp = $('shuffle-play-btn'); if (sp) sp.addEventListener('click', () => { setShuffle(true); playTrack(songs[Math.floor(Math.random() * songs.length)], songs); });
@@ -1750,7 +1761,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const AC = { want: new Set(), keep: new Set(), loading: new Map(), mem: new Map(), noStream: new Set() };
     const AC_MAX = 30;                                      // songs kept in the pre-download cache
     const isYTid = (id) => /^[\w-]{11}$/.test(String(id || ''));
-    const streamUsable = (t) => STREAM.on && Date.now() > STREAM.offUntil && navigator.onLine && isYTid(t.id) && !t.isLocal && !AC.noStream.has(t.id) && !(parseDur(t.duration) > 720);   // long songs (12+ min) go straight to the YouTube player: it streams them while they play
+    const streamUsable = (t) => STREAM.on && Date.now() > STREAM.offUntil && navigator.onLine && isYTid(t.id) && !t.isLocal && !AC.noStream.has(t.id);   // long songs use the same chunked audio path; do not force them into the embedded player
     const acMetaKey = () => 'sp_ac_' + (state.user ? state.user.uid : '');
     const acMeta = () => { try { return JSON.parse(localStorage.getItem(acMetaKey()) || '[]'); } catch (e) { return []; } };
 
@@ -1819,7 +1830,8 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchAudioNative(id) {
         const SIZE = 1024 * 1024, parts = [];
         let link = await nativeLink(id), start = 0;
-        if (link.total > 40 * 1024 * 1024) { AC.noStream.add(id); const e = new Error('too long'); e.tooLong = true; throw e; }
+        const totalBytes = link.total;
+        if (link.total > 220 * 1024 * 1024) { const e = new Error('file exceeds the 220 MB safety limit'); e.tooLong = true; throw e; }
         while (start < link.total) {
             if (!AC.want.has(id) && !AC.keep.has(id)) throw new Error('cancelled');      // you skipped away
             const end = Math.min(start + SIZE, link.total) - 1;
@@ -1832,6 +1844,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (u8.length > end - start + 1) u8 = u8.subarray(0, end - start + 1);
             if (!u8.length) throw new Error('empty chunk');
             parts.push(u8); start += u8.length;
+            if (AC.keep.has(id)) setDlProgress(id, start / totalBytes);
         }
         return new Blob(parts, { type: 'audio/mp4' });
     }
@@ -1854,7 +1867,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (IS_NATIVE) { try { return await fetchAudioNative(id); } catch (e) { if (e.message === 'cancelled' || e.tooLong) throw e; console.warn('on-phone download failed:', e.message); } }
         const SIZE = 3 * 1024 * 1024;
         const dl = AC.keep.has(id);                                   // true while you are downloading (long files are fine then)
-        const LIMIT = dl ? 220 * 1024 * 1024 : 25 * 1024 * 1024;      // for playing, big files use the YouTube player instead
+        const LIMIT = 220 * 1024 * 1024;      // allow long tracks for both playback and offline downloads
         let total = 0, mime = 'audio/mp4';
         const getChunk = async (start) => {                           // one piece, with a time limit and 3 tries (a stuck request can no longer freeze everything)
             let lastErr = null;
@@ -1957,7 +1970,7 @@ document.addEventListener('DOMContentLoaded', () => {
         state.loading = true; state.engine = null; updatePlayButtons();
         AC.want = new Set([track.id]);
         let fellBack = false;
-        const timer = setTimeout(() => { if (token === playToken && !fellBack) { fellBack = true; startYT(track, token, true); } }, 9000);   // slow: start the YouTube player meanwhile
+        const timer = setTimeout(() => { if (token === playToken && !fellBack) { fellBack = true; startYT(track, token, true); } }, 300000);   // five-minute mobile window for large/long audio before fallback
         try {
             const blob = await ensureAudio(track.id);
             clearTimeout(timer);
@@ -2341,6 +2354,7 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.miniPlayer.classList.remove('hidden');
         updatePlayerArt(t);
         updateWishlistBtnState(isLiked(t.id));
+        updateDownloadButtons(); // player-header button has no fixed data-id; refresh it for this track
         setWaveColors(t);
         if (state.qTab === 'similar') { state.similar = null; loadSimilar(); }
         renderQueue();
