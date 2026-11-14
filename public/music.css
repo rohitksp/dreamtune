@@ -1411,3 +1411,5 @@ html:not(.icons-ok) .material-symbols-rounded { color: transparent !important; -
 .upd-actions { display: flex; flex-direction: column; gap: 8px; }
 .upd-skip { background: transparent; border: 0; color: var(--text-2); font-weight: 700; font-size: .9rem; padding: 10px; cursor: pointer; }
 .drawer-item .upd-badge { margin-left: auto; font-size: .68rem; font-weight: 800; padding: 3px 8px; border-radius: 10px; background: #1ed760; color: #04210f; }
+
+.upd-card button:disabled { opacity: .65; pointer-events: none; }

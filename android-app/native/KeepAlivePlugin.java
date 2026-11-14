@@ -296,6 +296,98 @@ public class KeepAlivePlugin extends Plugin {
         call.resolve();
     }
 
+    /* ---------- in-app update: download the new APK inside DreamTune and open Android's installer ---------- */
+    private static volatile String upState = "none", upErr = "";
+    private static volatile long upDone = 0, upTotal = -1;
+
+    private static void fetchApk(String url, File target) throws Exception {
+        YtAudio.init();
+        okhttp3.Request req = new okhttp3.Request.Builder().url(url).build();
+        try (okhttp3.Response r = YtAudio.http.newCall(req).execute()) {
+            if (!r.isSuccessful() || r.body() == null) throw new java.io.IOException("HTTP " + r.code());
+            upTotal = r.body().contentLength();
+            File tmp = new File(target.getParentFile(), "download.part");
+            try (java.io.InputStream in = r.body().byteStream(); FileOutputStream out = new FileOutputStream(tmp)) {
+                byte[] buf = new byte[64 * 1024];
+                int n;
+                while ((n = in.read(buf)) > 0) { out.write(buf, 0, n); upDone += n; }
+            }
+            boolean zip = false;
+            try (FileInputStream fi = new FileInputStream(tmp)) { zip = fi.read() == 'P' && fi.read() == 'K'; }      // an APK is a zip file
+            if (tmp.length() < 1024 * 1024 || !zip) { tmp.delete(); throw new java.io.IOException("that link is not an app file"); }
+            if (target.exists()) target.delete();
+            if (!tmp.renameTo(target)) throw new java.io.IOException("could not save the update");
+        }
+    }
+
+    @PluginMethod
+    public void updStart(final PluginCall call) {
+        final String u1 = call.getString("url", ""), u2 = call.getString("url2", "");
+        if ("run".equals(upState)) { call.resolve(); return; }
+        upState = "run"; upDone = 0; upTotal = -1; upErr = "";
+        DL_POOL.execute(() -> {
+            try {
+                File dir = new File(getContext().getCacheDir(), "updates");
+                dir.mkdirs();
+                File f = new File(dir, "DreamTune.apk");
+                boolean fresh = f.exists() && f.length() > 1024 * 1024 && System.currentTimeMillis() - f.lastModified() < 20 * 60 * 1000L;
+                if (!fresh) {
+                    Exception last = null;
+                    boolean ok = false;
+                    for (String u : new String[] { u1, u2 }) {
+                        if (u == null || u.isEmpty()) continue;
+                        try { fetchApk(u, f); ok = true; break; } catch (Exception e) { last = e; upDone = 0; }
+                    }
+                    if (!ok) throw last != null ? last : new Exception("no update link");
+                }
+                upState = "ready";
+            } catch (Exception e) {
+                upErr = String.valueOf(e.getMessage());
+                upState = "error";
+            }
+        });
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void updState(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("state", upState);
+        r.put("err", upErr);
+        r.put("done", upDone);
+        r.put("total", upTotal);
+        r.put("pct", upTotal > 0 ? (int) Math.min(100, upDone * 100 / upTotal) : 0);
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void updInstall(PluginCall call) {
+        try {
+            Context c = getContext();
+            File f = new File(new File(c.getCacheDir(), "updates"), "DreamTune.apk");
+            if (!f.exists()) { call.reject("update file missing"); return; }
+            if (Build.VERSION.SDK_INT >= 26 && !c.getPackageManager().canRequestPackageInstalls()) {
+                Intent s = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + c.getPackageName()));
+                s.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                c.startActivity(s);
+                JSObject r = new JSObject();
+                r.put("needPermission", true);
+                call.resolve(r);
+                return;
+            }
+            Uri u = androidx.core.content.FileProvider.getUriForFile(c, c.getPackageName() + ".dtupdate", f);
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setDataAndType(u, "application/vnd.android.package-archive");
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            c.startActivity(i);
+            JSObject r = new JSObject();
+            r.put("started", true);
+            call.resolve(r);
+        } catch (Exception e) {
+            call.reject(String.valueOf(e.getMessage()));
+        }
+    }
+
     private synchronized String copyToMusic(File src, String name, String title, String artist) throws Exception {
         try {
             openSave(name, "audio/mp4", title, artist);

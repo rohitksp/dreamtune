@@ -1045,9 +1045,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         box.querySelectorAll('.dl-cancel').forEach(btn => { btn.onclick = () => cancelDownload(btn.dataset.id); });
     }
+    const dlRun = new Map();         // id -> number of the download that is running now (a cancel simply forgets it)
+    let dlSeq = 0;
     function cancelDownload(id) {
-        dlCancelled.add(id); AC.keep.delete(id);
+        dlRun.delete(id); dlCancelled.add(id); AC.keep.delete(id);
         if (IS_NATIVE) nat('KeepAlive', 'nDlCancel', { id }).catch(() => {});
+        dlActive.delete(id); dlPct.delete(id); state.dlBusy.delete(id);      // the row and the button reset right now
+        updateDownloadButtons(); renderActiveDownloads();
         showToast('Download cancelled', 2000);
     }
     function dlSetPct(id, pct, finishing) {
@@ -1070,45 +1074,53 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!navigator.onLine) { showToast('Connect to the internet to download'); return; }
         if (!isYTid(track.id)) { showToast('This song cannot be downloaded'); return; }
         state.dlBusy.add(track.id); dlCancelled.delete(track.id);
+        const run = ++dlSeq; dlRun.set(track.id, run);
+        const cancelled = () => dlRun.get(track.id) !== run;
         dlActive.set(track.id, { track, pct: 0 });
         updateDownloadButtons(); renderActiveDownloads();
         refreshLibrary().catch(() => {});                 // the song appears in Library > Downloads right now, with its progress
         showToast('Downloading "' + cleanTitle(track.title) + '" - watch it in Library > Downloads', 3200);
         try {
             let blob = null, onPhone = false, onPC = false, uri = '';
-            if (IS_NATIVE && NP.ok) {      // the phone downloads the song itself and puts it in Music/DreamTune
+            if (IS_NATIVE) {      // the phone downloads the song itself and puts it in Music/DreamTune
                 try {
                     await nat('KeepAlive', 'askStorage');
                     const r = await nat('KeepAlive', 'nDownload', npMeta(track));
                     if (r && r.uri) { uri = r.uri; }                 // older app version: the answer came at the end
                     else {                                           // new app version: runs in the background, we watch the percentage
-                        let quiet = 0;
+                        let quiet = 0, lastPct = -1, lastMove = Date.now();
                         for (;;) {
                             await sleep(450);
-                            if (dlCancelled.has(track.id)) throw new Error('cancelled');
+                            if (cancelled()) throw new Error('cancelled');
                             let st; try { st = await nat('KeepAlive', 'nDlState', { id: track.id }); } catch (e) { if (++quiet > 20) throw e; continue; }
                             quiet = 0;
-                            if (st.state === 'run') { dlSetPct(track.id, Math.min(99, st.pct || 0), st.phase === 1); continue; }
+                            if (st.state === 'run') {
+                                const pc = st.pct || 0;
+                                if (pc !== lastPct || st.phase === 1) { lastPct = pc; lastMove = Date.now(); }
+                                else if (Date.now() - lastMove > 90000) { nat('KeepAlive', 'nDlCancel', { id: track.id }).catch(() => {}); throw new Error('stalled'); }   // nothing moved for 90 s: stop and tell you
+                                dlSetPct(track.id, Math.min(99, pc), st.phase === 1); continue;
+                            }
                             if (st.state === 'done') { uri = st.uri || ''; break; }
                             throw new Error(st.err || 'download failed');
                         }
                     }
                     onPhone = !!uri;
                 } catch (e) {
-                    if (e && e.message === 'cancelled') throw e;
                     console.warn('native download failed:', e && e.message);
+                    throw e;                                   // the phone never falls back to the slow website route
                 }
             }
-            if (!uri) {
+            if (!uri && !IS_NATIVE) {
                 AC.keep.add(track.id);
                 const watch = setInterval(() => { const p = dlPct.get(track.id); if (p != null) dlSetPct(track.id, p); }, 400);
                 try { blob = await ensureAudio(track.id); } finally { clearInterval(watch); }
-                if (dlCancelled.has(track.id)) throw new Error('cancelled');
+                if (cancelled()) throw new Error('cancelled');
                 if (!blob || !blob.size) throw new Error('empty file');
                 dlSetPct(track.id, 99, true);
                 try { onPhone = await saveToPhone(blob, track); } catch (e) { console.warn('save to phone failed:', e); }
                 if (!IS_NATIVE && blob) onPC = saveToComputer(blob, track);       // PC: also a real file in your Downloads folder
             }
+            if (cancelled()) throw new Error('cancelled');
             dlSetPct(track.id, 100, false);
             await dbPut('downloads', { id: track.id, title: track.title, artist: track.artist, thumb: track.thumb || '', duration: track.duration || '',
                                        views: track.views || 0, blob, uri, size: blob ? blob.size : 0, onPhone, savedAt: Date.now() });
@@ -1120,11 +1132,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (err && err.message === 'cancelled') { /* user cancelled: nothing to report */ }
             else {
                 console.error('Download failed:', err);
-                showToast(navigator.onLine ? 'Could not download this song right now - please try again in a moment' : 'Download failed - check your internet and try again', 4500);
+                showToast(!navigator.onLine ? 'Download failed - check your internet and try again' : (err && err.message === 'stalled') ? 'The download did not start - please try again' : 'Could not download this song right now - please try again in a moment', 4500);
             }
         } finally {
-            AC.keep.delete(track.id); dlPct.delete(track.id); dlActive.delete(track.id); dlCancelled.delete(track.id);
-            state.dlBusy.delete(track.id); updateDownloadButtons(); renderActiveDownloads();
+            if (dlRun.get(track.id) === run) dlRun.delete(track.id);
+            if (!dlRun.has(track.id)) {                    // (if you started it again after a cancel, the new download keeps its state)
+                AC.keep.delete(track.id); dlPct.delete(track.id); dlActive.delete(track.id); dlCancelled.delete(track.id);
+                state.dlBusy.delete(track.id); updateDownloadButtons(); renderActiveDownloads();
+            }
             refreshLibrary().catch(() => {});
         }
     }
@@ -1491,41 +1506,44 @@ document.addEventListener('DOMContentLoaded', () => {
        Back button / swipe-back: closes what is open, then goes to the previous page.
        On the first page, back says "press back again to exit"; a second quick back leaves the app.
        --------------------------------------------------------------------- */
-    const NAV = { restoring: false, exitTimer: null, ready: false, exitArmed: 0 };
-    const currentViewId = () => { const a = document.querySelector('.view-panel.active, .view.active'); return a ? a.id : 'home-view'; };
-    function pushNav() { if (!NAV.ready || NAV.restoring) return; try { history.pushState({ dt: 'v', view: currentViewId() }, ''); } catch (e) {} }
+    const currentViewId = () => { const a = document.querySelector('.view-panel.active'); return a ? a.id : 'home-view'; };
+    const NAV = { stack: ['home-view'], armed: 0, exitTimer: null };
+    function pushNav() {
+        const v = currentViewId();
+        if (NAV.stack[NAV.stack.length - 1] !== v) { NAV.stack.push(v); if (NAV.stack.length > 30) NAV.stack.shift(); }
+    }
     function closeTopLayer() {      // returns true if something was open and got closed
         if (!elements.authScreen.classList.contains('hidden') && state.user) { closeAuth(); return true; }
         if (!elements.modalBackdrop.classList.contains('hidden')) { closeModal(); return true; }
         if (elements.drawer.classList.contains('open')) { closeDrawer(); return true; }
         if (!elements.fullPlayerOverlay.classList.contains('hidden')) { elements.fullPlayerOverlay.classList.add('hidden'); return true; }
-        const ob = $('onboarding'); if (ob && !ob.classList.contains('hidden')) return false;
         return false;
     }
-    function initNav() {
-        try {
-            history.replaceState({ dt: 'root' }, '');
-            history.pushState({ dt: 'v', view: currentViewId() }, '');
-            NAV.ready = true;
-        } catch (e) { return; }
-        window.addEventListener('popstate', (ev) => {
+    function backStep() {           // 'handled' = went back one step, 'home' = nothing left to go back to
+        if (closeTopLayer()) return 'handled';
+        if (currentViewId() === 'wishlist-view' && state.openPlaylistId) { state.openPlaylistId = null; renderWishlistView(); return 'handled'; }
+        if (NAV.stack.length > 1) { NAV.stack.pop(); setView(NAV.stack[NAV.stack.length - 1]); return 'handled'; }
+        if (currentViewId() !== 'home-view') { setView('home-view'); return 'handled'; }
+        return 'home';
+    }
+    window.__dtBack = function () {     // the Android app asks this on every back press (see MainActivity.java)
+        let r = 'handled';
+        try { r = backStep(); } catch (e) { console.error(e); }
+        if (r === 'handled') { NAV.armed = 0; return 'handled'; }
+        if (Date.now() < NAV.armed) return (state.isPlaying || state.loading) ? 'hide' : 'exit';     // music keeps playing in the background
+        NAV.armed = Date.now() + 2200;
+        showToast('Press back again to exit', 2000);
+        return 'handled';
+    };
+    function initNav() {                // website / installed web app: use the browser back button
+        if (IS_NATIVE) return;
+        try { history.replaceState({ dt: 'root' }, ''); history.pushState({ dt: 'app' }, ''); } catch (e) { return; }
+        window.addEventListener('popstate', () => {
             clearTimeout(NAV.exitTimer);
-            const st = ev.state || {};
-            if (closeTopLayer()) { history.pushState({ dt: 'v', view: currentViewId() }, ''); return; }     // keep the page, just close the sheet
-            if (st.dt === 'v') { NAV.restoring = true; setView(st.view || 'home-view'); NAV.restoring = false; return; }
-            // we are at the very first entry: this used to let a quick second back-press slip past
-            // JS entirely (nothing left to go back to, so Android just closed the app). Re-arm the
-            // guard synchronously, before anything else, so there is always one more step to pop.
-            history.pushState({ dt: 'root' }, '');
-            const now = Date.now();
-            if (NAV.exitArmed && now - NAV.exitArmed < 2200) {
-                NAV.exitArmed = 0;
-                try { window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.App && Capacitor.Plugins.App.exitApp(); } catch (e) {}
-                return;
-            }
-            NAV.exitArmed = now;
-            if (currentViewId() !== 'home-view') { NAV.restoring = true; setView('home-view'); NAV.restoring = false; }
+            const keep = () => { try { history.pushState({ dt: 'app' }, ''); } catch (e) {} };
+            if (backStep() === 'handled') { keep(); return; }
             showToast('Press back again to exit', 2000);
+            NAV.exitTimer = setTimeout(keep, 2200);       // not pressed again: stay in the app
         });
     }
     setTimeout(initNav, 0);
@@ -1553,17 +1571,49 @@ document.addEventListener('DOMContentLoaded', () => {
             const webUpdate = !!(U.loadedWeb && v.web && String(v.web) !== U.loadedWeb);
             return { appUpdate, webUpdate, any: appUpdate || webUpdate };
         }
-        function openApkLink(v) { window.open(v.apk || v.url, '_blank'); }
+        function openApkLink(v) { window.open(v.apk || v.url, '_blank'); }      // only used if the in-app update is not possible
+        let upBusy = false;
+        // download the new app INSIDE DreamTune and hand it to Android's installer (no browser, no GitHub)
+        async function installInApp(v, ui) {
+            if (upBusy) return; upBusy = true;
+            const say = (t, busy) => { if (ui && ui.btn) { ui.btn.querySelector('.btn-label').textContent = t; ui.btn.disabled = !!busy; } if (ui && ui.skip) ui.skip.disabled = !!busy; };
+            try {
+                const direct = new URL(v.apkDirect || '/app/DreamTune.apk', location.origin).href;
+                say('Starting...', true);
+                await nat('KeepAlive', 'updStart', { url: direct, url2: v.apk || '' });
+                let quiet = 0;
+                for (;;) {
+                    await sleep(400);
+                    let st; try { st = await nat('KeepAlive', 'updState'); } catch (e) { if (++quiet > 15) throw e; continue; }
+                    quiet = 0;
+                    if (st.state === 'run') { say(st.pct > 0 ? 'Downloading ' + st.pct + '%' : 'Downloading...', true); continue; }
+                    if (st.state === 'ready') break;
+                    throw new Error(st.err || 'download failed');
+                }
+                say('Opening installer...', true);
+                const r = await nat('KeepAlive', 'updInstall');
+                if (r && r.needPermission) {
+                    showToast('Allow "Install unknown apps" for DreamTune in the screen that opened, then press Update again', 7000);
+                    say('Update now', false);
+                } else {
+                    showToast('Tap "Install" on the Android screen - your songs and playlists stay safe', 6000);
+                    closePopup();
+                }
+            } catch (e) {
+                console.warn('in-app update failed:', e && e.message);
+                const old = /not implemented|UNIMPLEMENTED/i.test(String((e && e.message) || ''));     // this installed app is too old to update itself: the very first time only
+                say('Update now', false);
+                showToast(old ? 'This one time, download the app by hand - after that it updates inside DreamTune' : 'Could not download the update - check your internet and try again', 6000);
+                if (old) openApkLink(v);
+            } finally { upBusy = false; }
+        }
         function paintProfile(v) {
             const st = v ? status(v) : null;
             const sub = $('update-status'), badge = $('update-badge'), box = $('update-box');
             const ver = (U.loadedWeb ? 'Version ' + U.loadedWeb : 'DreamTune') + (IS_NATIVE ? ' \u2022 app build ' + mine : '');
             if (sub) sub.textContent = !v ? ver + ' \u2022 tap to check' : st.any ? 'New update is ready \u2022 tap to update' : ver + ' \u2022 up to date';
             if (badge) badge.classList.toggle('hidden', !(st && st.any));
-            if (box) {
-                box.classList.toggle('hidden', !(st && st.appUpdate));
-                const b = $('update-btn'); if (b && v) b.onclick = () => openApkLink(v);
-            }
+            if (box) box.classList.add('hidden');          // the big card is gone: the "App updates" row above is the only place now
         }
 
         function closePopup() { if (U.popup) { U.popup.remove(); U.popup = null; } }
@@ -1585,9 +1635,8 @@ document.addEventListener('DOMContentLoaded', () => {
             document.body.appendChild(el);
             U.popup = el;
             $('upd-now').onclick = () => {
-                closePopup();
-                if (st.appUpdate) { openApkLink(v); showToast('Download the app, then open it to install - your data stays safe', 5000); }
-                else location.reload();
+                if (st.appUpdate) { installInApp(v, { btn: $('upd-now'), skip: $('upd-skip') }); return; }
+                closePopup(); location.reload();
             };
             $('upd-skip').onclick = () => {
                 try { localStorage.setItem('dt_upd_skip', keyOf(v)); } catch (e) {}
@@ -2128,47 +2177,41 @@ document.addEventListener('DOMContentLoaded', () => {
         if (now) go(); else setTimeout(go, 200);          // quick skips only load the song you stop on
     }
 
+    // Website: the audio tag reads the song piece by piece from /api/audio (first piece is tiny = starts at once,
+    // then it keeps asking for the next pieces; jumping ahead asks for the piece at that spot).
     async function startStreamed(track, token) {
-        state.loading = true; state.engine = null; updatePlayButtons();
+        state.loading = true; state.engine = 'audio'; updatePlayButtons();
         AC.want = new Set([track.id]);
-        let fellBack = false;
-        const timer = setTimeout(() => { if (token === playToken && !fellBack) { fellBack = true; startYT(track, token, true); } }, 9000);   // slow: start the YouTube player meanwhile
-        try {
-            const blob = await ensureAudio(track.id);
-            clearTimeout(timer);
-            if (token !== playToken || fellBack) return;
-            playBlob(track, blob);
-            setTimeout(() => {      // safety net: still "loading" after 15 s -> use the YouTube player
-                if (token === playToken && state.engine === 'audio' && state.loading && !audio.currentTime && !track._ytFallback) {
-                    track._ytFallback = true; stopEngines(); startYT(track, token, true);
-                }
-            }, 15000);
-        } catch (err) {
-            clearTimeout(timer);
-            if (err && err.message === 'cancelled') return;
-            if (token === playToken && !fellBack) startYT(track, token, true);
-        }
+        if (state.objectUrl) { URL.revokeObjectURL(state.objectUrl); state.objectUrl = null; }
+        audio.src = `${API_BASE}/api/audio?id=${encodeURIComponent(track.id)}`;
+        audio.play().catch(err => { if (err && err.name !== 'AbortError') { state.loading = false; updatePlayButtons(); showToast('Tap play to start'); } });
+        // nothing at all after 25 s (the request hangs): only then use the YouTube player (website only, never in the phone app)
+        setTimeout(() => {
+            if (token === playToken && state.engine === 'audio' && state.loading && !audio.currentTime && !track._ytFallback && !IS_NATIVE) {
+                track._ytFallback = true; stopEngines(); startYT(track, token, true);
+            }
+        }, 25000);
     }
 
     function prefetchSoon() { clearTimeout(prefetchTimer); prefetchTimer = setTimeout(prefetchRun, 1500); }
-    async function prefetchRun() {          // download the next songs while this one plays
+    async function prefetchRun() {          // website: get the next song ready while this one plays (only the first piece)
         const cur = state.currentTrack;
-        if (!cur || !navigator.onLine || !STREAM.on || Date.now() < STREAM.offUntil) return;
+        if (!cur || IS_NATIVE || !navigator.onLine || !STREAM.on || Date.now() < STREAM.offUntil) return;
         try { if (navigator.connection && navigator.connection.saveData) return; } catch (e) {}
         const list = state.radio ? state.queue : (state.shuffle ? [] : state.playlist.slice(state.currentIndex + 1));
-        const up = list.slice(0, 2).filter(t => isYTid(t.id) && !t.isLocal && !AC.noStream.has(t.id));
-        AC.want = new Set([cur.id, ...up.map(t => t.id)]);
-        for (const t of up) {
-            if (state.currentTrack !== cur) return;
-            try { await ensureAudio(t.id); } catch (e) { if (!e || e.message !== 'cancelled') return; }
-        }
+        const nx = list.filter(t => isYTid(t.id) && !t.isLocal && !AC.noStream.has(t.id))[0];
+        if (!nx || nx._warm) return;
+        nx._warm = true;
+        try { await fetch(`${API_BASE}/api/audio?id=${encodeURIComponent(nx.id)}`, { headers: { Range: 'bytes=0-65535' } }); } catch (e) {}
     }
 
     audio.addEventListener('waiting', () => { if (state.engine === 'audio') { state.loading = true; updatePlayButtons(); } });
-    audio.addEventListener('playing', () => { if (state.engine === 'audio') { state.loading = false; updatePlayButtons(); prefetchSoon(); } });
+    audio.addEventListener('playing', () => { if (state.engine === 'audio') { state.loading = false; updatePlayButtons(); noteStream(null); prefetchSoon(); } });
     audio.addEventListener('error', () => {   // a downloaded copy that cannot play: use the YouTube player instead
         const t = state.currentTrack;
         if (state.engine !== 'audio' || !t || t.isLocal || !isYTid(t.id) || t._ytFallback) return;
+        if (IS_NATIVE) return;                       // the phone app never switches player
+        noteStream(new Error('audio error')); AC.noStream.add(t.id);
         t._ytFallback = true; stopEngines(); startYT(t, playToken, true);
     });
     // phones only allow sound that was started by a tap; this "unlocks" the audio tag on the first tap so downloaded songs can start by themselves
@@ -2209,7 +2252,8 @@ document.addEventListener('DOMContentLoaded', () => {
         nat('KeepAlive', 'askNotifications').catch(() => {}).then(() => nat('KeepAlive', 'batteryExempt')).catch(() => {});
     }
 
-    async function startNative(track, token, adopt) {
+    async function startNative(track, token, adopt, tryNo) {
+        tryNo = tryNo || 0;
         state.engine = 'native'; NP.active = true; NP.endHandled = false; NP.queuedFor = '';
         if (adopt) { state.loading = false; state.isPlaying = true; updatePlayButtons(); return; }
         state.loading = true; updatePlayButtons();
@@ -2227,11 +2271,13 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('native player failed:', e && e.message);
             if (e && e.message === 'cancelled') return;
             if (e && e.message === 'timeout') nat('KeepAlive', 'nStop').catch(() => {});   // stop it in case it finishes late, after we've already moved to the fallback player
-            NP.fails++; if (NP.fails >= 4) NP.ok = false;
             NP.active = false; state.engine = null;
-            if (!navigator.onLine) { state.loading = false; updatePlayButtons(); showToast('Could not play this song'); return; }
-            showToast('Switching player...', 1500);
-            if (streamUsable(track)) startStreamed(track, token); else startYT(track, token, true);
+            if (!navigator.onLine) { state.loading = false; updatePlayButtons(); showToast('You are offline - connect to the internet to play this song'); return; }
+            // no other player is ever used on the phone (they stop in the background): ask the native player again, twice
+            if (tryNo < 2) { setTimeout(() => { if (token === playToken) startNative(track, token, false, tryNo + 1); }, 700 * (tryNo + 1)); return; }
+            state.loading = false; updatePlayButtons();
+            showToast('Could not play this song - skipping', 2500);
+            setTimeout(() => { if (token === playToken) playNextTrack(); }, 1200);
         }
     }
 
@@ -2301,7 +2347,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const dlRec = state.downloads.get(track.id);
         const blob = track.audioBlob || (saved && saved.audioBlob) || (dlRec && dlRec.blob);
         const adopt = NP.adopt === track.id; NP.adopt = null;
-        const viaNative = IS_NATIVE && NP.ok && !track.isLocal && !blob && ((dlRec && dlRec.uri) || (isYTid(track.id) && navigator.onLine));
+        const viaNative = IS_NATIVE && !track.isLocal && !blob && ((dlRec && dlRec.uri) || (isYTid(track.id) && navigator.onLine));
 
         if (!track.isLocal && !blob && !viaNative && !navigator.onLine) {
             showToast('You are offline and this song is not downloaded');
@@ -2512,7 +2558,7 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.miniTitle.textContent = cleanTitle(t.title);
         elements.miniArtist.textContent = t.artist;
         elements.playerTitle.textContent = cleanTitle(t.title);
-        elements.playerArtist.innerHTML = escapeHtml(t.artist) + viewsHTML(t.views);
+        elements.playerArtist.innerHTML = metaHTML(t);
         const full = noEmoji(t.title || '').trim();
         $('player-fulltitle').textContent = full;
         $('player-meta').textContent = [t.artist, t.duration ? 'Length ' + t.duration : ''].filter(Boolean).join('  \u2022  ');
@@ -2520,6 +2566,7 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.miniPlayer.classList.remove('hidden');
         updatePlayerArt(t);
         updateWishlistBtnState(isLiked(t.id));
+        updateDownloadButtons();
         setWaveColors(t);
         if (state.qTab === 'similar') { state.similar = null; loadSimilar(); }
         renderQueue();
@@ -2707,6 +2754,14 @@ document.addEventListener('DOMContentLoaded', () => {
     function eyeSpan(n) {
         return n ? `<span class="eye"><span class="material-symbols-rounded">visibility</span>${fmtViews(n)}</span>` : '';
     }
+    // one line under a song title:  duration  .  views  .  channel
+    function metaHTML(x) {
+        const parts = [];
+        if (x.duration) parts.push(escapeHtml(x.duration));
+        if (x.views) parts.push(eyeSpan(x.views));
+        if (x.artist) parts.push(escapeHtml(x.artist));
+        return parts.join(' \u2022 ');
+    }
     function viewsHTML(n) {
         return n ? ` • ${eyeSpan(n)}` : '';
     }
@@ -2740,7 +2795,7 @@ document.addEventListener('DOMContentLoaded', () => {
         box.innerHTML = l.map((r, i) => {
             const pct = r.dur > 0 ? Math.min(100, r.pos / r.dur * 100) : 0;
             return `<button class="recent-item" data-i="${i}"><span class="rc-img"><img data-src="${escapeHtml(r.thumb || '')}" alt=""><i class="rc-bar" style="width:${pct}%"></i></span>
-                <span class="rc-t"><strong class="truncate">${escapeHtml(cleanTitle(r.title))}</strong><small class="truncate">${escapeHtml(r.artist)}${viewsHTML(r.views)}</small>
+                <span class="rc-t"><strong class="truncate">${escapeHtml(cleanTitle(r.title))}</strong><small class="truncate">${metaHTML(r)}</small>
                 <small class="rc-time">Played for ${fmtListen(r.pos)}${r.dur ? ' of ' + fmtListen(r.dur) : ''}</small></span>
                 <span class="material-symbols-rounded">play_arrow</span></button>`;
         }).join('');
@@ -3037,14 +3092,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
             const play = (i) => playTrack(i, items, { radio: true, mood: s.m || detectMood(i.title + ' ' + i.artist), upnext: afterTrack(items, i) });
-            const row = (it, i) => `<button class="mini-row" data-i="${i}"><img data-src="${escapeHtml(it.thumb)}" alt=""><span class="mr-t"><strong class="truncate">${escapeHtml(cleanTitle(it.title))}</strong><small class="truncate">${escapeHtml(it.artist)}${viewsHTML(it.views)}${it.duration ? ' • ' + escapeHtml(it.duration) : ''}</small></span></button>`;
+            const row = (it, i) => `<button class="mini-row" data-i="${i}"><img data-src="${escapeHtml(it.thumb)}" alt=""><span class="mr-t"><strong class="truncate">${escapeHtml(cleanTitle(it.title))}</strong><small class="truncate">${metaHTML(it)}</small></span></button>`;
             if (s.k === 'list') body.innerHTML = items.map(row).join('');
             else if (s.k === 'rows') {
                 let cols = '';
                 for (let c = 0; c < items.length; c += 4) cols += '<div class="rowcol">' + items.slice(c, c + 4).map((it, k) => row(it, c + k)).join('') + '</div>';
                 body.innerHTML = cols;
             } else {
-                body.innerHTML = items.map((it, i) => `<button class="card" data-i="${i}"><img alt=""><strong class="truncate">${escapeHtml(cleanTitle(it.title))}</strong><small class="truncate">${escapeHtml(it.artist)}${viewsHTML(it.views)}</small></button>`).join('');
+                body.innerHTML = items.map((it, i) => `<button class="card" data-i="${i}"><img alt=""><strong class="truncate">${escapeHtml(cleanTitle(it.title))}</strong><small class="truncate">${metaHTML(it)}</small></button>`).join('');
                 body.querySelectorAll('.card').forEach((c, i) => hd(c.querySelector('img'), items[i]));
             }
             body.querySelectorAll('img[data-src]').forEach(im => setCover(im, im.dataset.src, im.closest('.mini-row')));

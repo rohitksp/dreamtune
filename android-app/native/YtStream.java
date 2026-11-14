@@ -86,7 +86,7 @@ final class YtStream {
 
     /** Asks YouTube the way the phone apps do: one small request, answer in well under a second. */
     private static Link findFast(String id) throws Exception {
-        if (fast == null) fast = YtAudio.http.newBuilder().callTimeout(9, TimeUnit.SECONDS).build();
+        if (fast == null) fast = YtAudio.http.newBuilder().callTimeout(5, TimeUnit.SECONDS).build();
         Exception last = null;
         for (String[] c : CLIENTS) {
             try {
