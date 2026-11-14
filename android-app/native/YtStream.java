@@ -246,15 +246,21 @@ final class YtStream {
                             Matcher m = CR.matcher(h);
                             if (m.find()) {
                                 String t = m.group(3) != null ? m.group(3) : m.group(4);
-                                if (t != null && !"*".equals(t)) total = Long.parseLong(t);
+                                // With the &range= parameter YouTube reports "end of this piece + 1" as the size of the whole file.
+                                // Believing it made the song end after the first piece (about 24 s) -> error -> skipped to the next song,
+                                // and made every jump ahead end right away. The size that came WITH THE LINK is the real one.
+                                if (t != null && !"*".equals(t) && l.total < 0) {
+                                    long ct = Long.parseLong(t);
+                                    if (ct != to + 1) total = ct;
+                                }
                             }
                         } else if (code == 200) {
                             // 200 without Content-Range: if the body is only as long as the piece we asked for, it IS that piece
                             // (the old code took its length for the size of the whole song, which made every jump ahead end at once)
                             whole = bodyLen <= 0 || bodyLen > asked;
-                            if (whole && bodyLen > 0) total = bodyLen;
+                            if (whole && bodyLen > 0 && l.total < 0) total = bodyLen;
                         }
-                        if (total < 0 && l.total >= 0) total = l.total;              // the size YouTube told us with the link
+                        if (l.total >= 0) total = l.total;              // the size YouTube told us with the link
                         InputStream s = r.body().byteStream();
                         if (whole && from > 0) {                                     // skip to where we wanted to be
                             long left = from;

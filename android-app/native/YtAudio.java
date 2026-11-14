@@ -103,7 +103,7 @@ public class YtAudio {
     }
 
     /** the audio server, asked with OkHttp */
-    static AudioFetch.Source okSource(final String url, final String ua) {
+    static AudioFetch.Source okSource(final String url, final String ua, final long knownTotal) {
         final Pattern cr = Pattern.compile("bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)|bytes\\s+\\*/(\\d+)");
         return (start, end) -> {
             okhttp3.Request req = new okhttp3.Request.Builder().url(url + "&range=" + start + "-" + end)
@@ -123,6 +123,9 @@ public class YtAudio {
                         }
                     }
                 }
+                // YouTube's Content-Range size is wrong when &range= is used (it says "end of this piece + 1"): use the size from the link
+                if (knownTotal >= 0) p.total = knownTotal;
+                else if (p.total == end + 1) p.total = -1;
                 if (p.code == 200 || p.code == 206) p.data = r.body() != null ? r.body().bytes() : new byte[0];
                 return p;
             }
@@ -163,9 +166,9 @@ public class YtAudio {
                         String clen = Uri.parse(url).getQueryParameter("clen");
                         if (clen != null) { try { total = Long.parseLong(clen); } catch (Exception e) { } }
                     }
-                    // 1st and 3rd try: 1 MB pieces. 2nd try: bigger pieces
-                    long chunk = attempt == 1 ? BIG_CHUNK : CHUNK;
-                    AudioFetch.Source plain = okSource(url, ua);
+                    // always 1 MB pieces (bigger ones got HTTP 403)
+                    long chunk = CHUNK;
+                    AudioFetch.Source plain = okSource(url, ua, total);
                     final long hint = total;
                     AudioFetch.Source src = progress == null ? plain : (a, b) -> {
                         AudioFetch.Part p = plain.get(a, b);
