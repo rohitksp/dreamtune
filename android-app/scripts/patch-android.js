@@ -49,6 +49,28 @@ dependencies {
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.0.4'
 }
 `;
+// ---- same signing key + rising version number on every build, so a new APK installs OVER the old app (no uninstall)
+ag += `
+android {
+    defaultConfig {
+        versionCode (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+        versionName '1.0.' + (System.getenv('GITHUB_RUN_NUMBER') ?: '1')
+    }
+    if (System.getenv('DT_KEYSTORE')) {
+        signingConfigs {
+            dt {
+                storeFile file(System.getenv('DT_KEYSTORE'))
+                storePassword System.getenv('DT_STORE_PASS')
+                keyAlias System.getenv('DT_KEY_ALIAS')
+                keyPassword System.getenv('DT_KEY_PASS')
+            }
+        }
+        buildTypes {
+            debug { signingConfig signingConfigs.dt }
+        }
+    }
+}
+`;
 fs.writeFileSync(appGradle, ag);
 
 // ---- app icon + splash screen: use the DreamTune logo instead of the default Capacitor one

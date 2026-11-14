@@ -13,6 +13,7 @@ public class MainActivity extends BridgeActivity {
         try {
             WebSettings s = getBridge().getWebView().getSettings();
             s.setMediaPlaybackRequiresUserGesture(false);   // let the next song start by itself with the screen off
+            s.setUserAgentString(s.getUserAgentString() + " DreamTuneApp/2");   // bump together with public/version.json when native code changes
         } catch (Exception e) { }
     }
 

@@ -1,0 +1,5 @@
+{
+  "android": 2,
+  "url": "https://github.com/rohitksp/dreamtune/releases/latest",
+  "note": "Bump android when you change anything in android-app/ (icons, Java code, permissions)."
+}

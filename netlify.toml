@@ -9,3 +9,14 @@
   from = "/api/*"
   to = "/.netlify/functions/api"
   status = 200
+
+# always fetch the newest app files (so the website and the Android app update by themselves after every deploy)
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"

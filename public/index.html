@@ -5,7 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#07050f">
     <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="apple-touch-icon" href="/icon-192.png">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" href="/icon-192.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="DreamTune">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="format-detection" content="telephone=no">
     <title>DreamTune - Music Player</title>
     <script>try { document.documentElement.setAttribute('data-theme', localStorage.getItem('sp_theme') || 'dark'); } catch (e) {}</script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -255,8 +262,15 @@
                         <div class="art-disc"><img id="player-artwork" src="" alt="Album Art"></div>
                     </div>
                     <div class="track-info">
-                        <h2 id="player-title" class="truncate">Select a Song</h2>
+                        <div class="title-row">
+                            <h2 id="player-title" class="clamp-2">Select a Song</h2>
+                            <button id="title-toggle" class="icon-btn" type="button" aria-expanded="false" aria-label="Show full title"><span class="material-symbols-rounded">keyboard_arrow_down</span></button>
+                        </div>
                         <p id="player-artist" class="truncate">DreamTune Player</p>
+                        <div id="track-more" class="track-more hidden">
+                            <p id="player-fulltitle" class="full-title"></p>
+                            <p id="player-meta" class="full-meta"></p>
+                        </div>
                     </div>
                     <div class="seek-wrapper">
                         <input type="range" id="seek-bar" min="0" max="100" value="0" step="0.1">
@@ -318,6 +332,16 @@
                     <span id="sync-icon" class="material-symbols-rounded">cloud_done</span>
                     <span class="drawer-text">Cloud sync<small id="sync-status">Playlists follow your account</small></span>
                 </div>
+            </div>
+
+            <div id="update-box" class="guest-box hidden">
+                <strong>Update available</strong>
+                <p>A new version of the DreamTune app is ready. Tap to get it &ndash; it installs over the old one and keeps your data.</p>
+                <button id="update-btn" class="btn-gradient" type="button"><span class="material-symbols-rounded">download</span><span class="btn-label">Update the app</span></button>
+            </div>
+            <div id="ios-box" class="guest-box hidden">
+                <strong>Add DreamTune to your Home Screen</strong>
+                <p>In Safari, tap the Share button, then &ldquo;Add to Home Screen&rdquo;. DreamTune then opens like a real app.</p>
             </div>
 
             <button id="logout-btn" class="logout-btn hidden">

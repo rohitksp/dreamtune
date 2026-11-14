@@ -1053,7 +1053,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Download failed:', err);
             showToast(navigator.onLine ? 'Could not download this song right now - please try again in a moment' : 'Download failed - check your internet and try again', 4500);
         } finally {
-            AC.keep.delete(track.id);
+            AC.keep.delete(track.id); dlPct.delete(track.id);
             state.dlBusy.delete(track.id); updateDownloadButtons();
         }
     }
@@ -1064,13 +1064,20 @@ document.addEventListener('DOMContentLoaded', () => {
         showToast('Removed from Downloads' + (IS_NATIVE ? ' (the copy in your phone Music folder stays)' : ''), 3000);
     }
 
+    const dlPct = new Map();
+    function setDlProgress(id, f) {
+        const p = Math.min(99, Math.floor(f * 100));
+        if (dlPct.get(id) === p) return;
+        dlPct.set(id, p); updateDownloadButtons();
+    }
     function updateDownloadButtons() {
         document.querySelectorAll('.dl-btn').forEach(b => {
             const id = b.dataset.id || (state.currentTrack && state.currentTrack.id);
             const done = state.downloads.has(id), busy = state.dlBusy.has(id);
             const sp = b.querySelector('span');
             sp.textContent = done ? 'download_done' : (busy ? 'progress_activity' : 'download');
-            sp.classList.toggle('spin', busy);
+            sp.classList.toggle('spin', busy && !dlPct.has(id));
+            if (busy && dlPct.has(id)) b.dataset.pct = dlPct.get(id) + '%'; else delete b.dataset.pct;
             b.classList.toggle('active', done);
         });
     }
@@ -1404,7 +1411,62 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.contentArea.scrollTop = 0;
         if (viewId === 'search-view' && window.innerWidth >= 900) setTimeout(() => elements.searchInput.focus(), 60);
     }
-    elements.navTabs.forEach(tab => tab.addEventListener('click', () => setView(tab.getAttribute('data-target'))));
+    elements.navTabs.forEach(tab => tab.addEventListener('click', () => { setView(tab.getAttribute('data-target')); pushNav(); }));
+
+    /* ---------------------------------------------------------------------
+       Back button / swipe-back: closes what is open, then goes to the previous page.
+       On the first page, back says "press back again to exit"; a second quick back leaves the app.
+       --------------------------------------------------------------------- */
+    const NAV = { restoring: false, exitTimer: null, ready: false };
+    const currentViewId = () => { const a = document.querySelector('.view-panel.active, .view.active'); return a ? a.id : 'home-view'; };
+    function pushNav() { if (!NAV.ready || NAV.restoring) return; try { history.pushState({ dt: 'v', view: currentViewId() }, ''); } catch (e) {} }
+    function closeTopLayer() {      // returns true if something was open and got closed
+        if (!elements.authScreen.classList.contains('hidden') && state.user) { closeAuth(); return true; }
+        if (!elements.modalBackdrop.classList.contains('hidden')) { closeModal(); return true; }
+        if (elements.drawer.classList.contains('open')) { closeDrawer(); return true; }
+        if (!elements.fullPlayerOverlay.classList.contains('hidden')) { elements.fullPlayerOverlay.classList.add('hidden'); return true; }
+        const ob = $('onboarding'); if (ob && !ob.classList.contains('hidden')) return false;
+        return false;
+    }
+    function initNav() {
+        try {
+            history.replaceState({ dt: 'root' }, '');
+            history.pushState({ dt: 'v', view: currentViewId() }, '');
+            NAV.ready = true;
+        } catch (e) { return; }
+        window.addEventListener('popstate', (ev) => {
+            clearTimeout(NAV.exitTimer);
+            const st = ev.state || {};
+            if (closeTopLayer()) { history.pushState({ dt: 'v', view: currentViewId() }, ''); return; }     // keep the page, just close the sheet
+            if (st.dt === 'v') { NAV.restoring = true; setView(st.view || 'home-view'); NAV.restoring = false; return; }
+            // we are at the very first entry
+            if (currentViewId() !== 'home-view') { NAV.restoring = true; setView('home-view'); NAV.restoring = false; history.pushState({ dt: 'v', view: 'home-view' }, ''); return; }
+            showToast('Press back again to exit', 2000);
+            NAV.exitTimer = setTimeout(() => { try { history.pushState({ dt: 'v', view: currentViewId() }, ''); } catch (e) {} }, 2200);   // not pressed again: stay in the app
+        });
+    }
+    setTimeout(initNav, 0);
+
+    /* ---------------------------------------------------------------------
+       App update notice (Android app) + "Add to Home Screen" hint (iPhone / iPad)
+       The screens and features update by themselves when you deploy to Netlify.
+       This notice is only for the installed Android app, when its native part changed.
+       --------------------------------------------------------------------- */
+    (function updateAndHints() {
+        const ua = navigator.userAgent || '';
+        const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const standalone = window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+        if (isIOS && !standalone && !IS_NATIVE) $('ios-box').classList.remove('hidden');
+        if (!IS_NATIVE) return;
+        const m = ua.match(/DreamTuneApp\/(\d+)/);
+        const mine = m ? Number(m[1]) : 1;                 // apps built before this feature count as version 1
+        fetch('/version.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.json()).then(v => {
+            if (!v || Number(v.android) <= mine) return;
+            $('update-box').classList.remove('hidden');
+            $('update-btn').onclick = () => window.open(v.url, '_blank');
+            if (!sessionStorage.getItem('dt_update_toast')) { sessionStorage.setItem('dt_update_toast', '1'); showToast('A new app version is available - open your profile to update', 5000); }
+        }).catch(() => {});
+    })();
 
     /* ---------------------------------------------------------------------
        Home feed + search with infinite scroll (20 songs per page)
@@ -1688,7 +1750,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const AC = { want: new Set(), keep: new Set(), loading: new Map(), mem: new Map(), noStream: new Set() };
     const AC_MAX = 30;                                      // songs kept in the pre-download cache
     const isYTid = (id) => /^[\w-]{11}$/.test(String(id || ''));
-    const streamUsable = (t) => STREAM.on && Date.now() > STREAM.offUntil && navigator.onLine && isYTid(t.id) && !t.isLocal && !AC.noStream.has(t.id);
+    const streamUsable = (t) => STREAM.on && Date.now() > STREAM.offUntil && navigator.onLine && isYTid(t.id) && !t.isLocal && !AC.noStream.has(t.id) && !(parseDur(t.duration) > 720);   // long songs (12+ min) go straight to the YouTube player: it streams them while they play
     const acMetaKey = () => 'sp_ac_' + (state.user ? state.user.uid : '');
     const acMeta = () => { try { return JSON.parse(localStorage.getItem(acMetaKey()) || '[]'); } catch (e) { return []; } };
 
@@ -1790,21 +1852,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchAudio(id) {
         if (IS_NATIVE) { try { return await fetchAudioNative(id); } catch (e) { if (e.message === 'cancelled' || e.tooLong) throw e; console.warn('on-phone download failed:', e.message); } }
-        const SIZE = 3 * 1024 * 1024, parts = [];
-        let start = 0, total = 0, mime = 'audio/mp4';
-        for (let n = 0; n < 24; n++) {
-            if (!AC.want.has(id) && !AC.keep.has(id)) throw new Error('cancelled');      // you skipped away
-            const r = await fetch(`${API_BASE}/api/stream?id=${encodeURIComponent(id)}&start=${start}&size=${SIZE}`);
-            if (!r.ok) { const e = new Error('stream HTTP ' + r.status); e.status = r.status; throw e; }
-            total = Number(r.headers.get('X-Total-Length')) || total;
-            mime = (r.headers.get('Content-Type') || mime).split(';')[0];
-            const buf = await r.arrayBuffer();
-            if (!buf.byteLength) throw new Error('empty chunk');
-            if (total > 40 * 1024 * 1024) { AC.noStream.add(id); const e = new Error('too long'); e.tooLong = true; throw e; }
-            parts.push(buf); start += buf.byteLength;
-            if (!total || start >= total) break;
-        }
-        if (!total || start < total) throw new Error('incomplete download');
+        const SIZE = 3 * 1024 * 1024;
+        const dl = AC.keep.has(id);                                   // true while you are downloading (long files are fine then)
+        const LIMIT = dl ? 220 * 1024 * 1024 : 25 * 1024 * 1024;      // for playing, big files use the YouTube player instead
+        let total = 0, mime = 'audio/mp4';
+        const getChunk = async (start) => {                           // one piece, with a time limit and 3 tries (a stuck request can no longer freeze everything)
+            let lastErr = null;
+            for (let tr = 0; tr < 3; tr++) {
+                if (!AC.want.has(id) && !AC.keep.has(id)) throw new Error('cancelled');
+                const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 25000);
+                try {
+                    const r = await fetch(`${API_BASE}/api/stream?id=${encodeURIComponent(id)}&start=${start}&size=${SIZE}`, { signal: ctl.signal });
+                    if (!r.ok) { const e = new Error('stream HTTP ' + r.status); e.status = r.status; if (r.status === 404 || r.status === 501) throw e; lastErr = e; continue; }
+                    total = Number(r.headers.get('X-Total-Length')) || total;
+                    mime = (r.headers.get('Content-Type') || mime).split(';')[0];
+                    const buf = await r.arrayBuffer();
+                    if (!buf.byteLength) { lastErr = new Error('empty chunk'); continue; }
+                    return buf;
+                } catch (e) { if (e.status === 404 || e.status === 501 || e.message === 'cancelled') throw e; lastErr = e; }
+                finally { clearTimeout(timer); }
+                await new Promise(res => setTimeout(res, 600 * (tr + 1)));
+            }
+            throw lastErr || new Error('chunk failed');
+        };
+        const first = await getChunk(0);
+        if (!total) throw new Error('no length');
+        if (total > LIMIT) { if (!dl) AC.noStream.add(id); const e = new Error('too long'); e.tooLong = true; throw e; }
+        const parts = [first], starts = [];
+        for (let st = first.byteLength; st < total; st += SIZE) starts.push(st);
+        const results = new Array(starts.length);
+        let next = 0, got = first.byteLength;
+        const worker = async () => {
+            while (next < starts.length) {
+                const i = next++;
+                results[i] = await getChunk(starts[i]);
+                got += results[i].byteLength;
+                if (dl) setDlProgress(id, got / total);
+            }
+        };
+        await Promise.all([worker(), worker(), worker()]);           // 3 pieces at a time
+        results.forEach(b => parts.push(b));
+        if (parts.reduce((a, b) => a + b.byteLength, 0) < total) throw new Error('incomplete download');
         return new Blob(parts, { type: mime });
     }
 
@@ -1875,6 +1963,11 @@ document.addEventListener('DOMContentLoaded', () => {
             clearTimeout(timer);
             if (token !== playToken || fellBack) return;
             playBlob(track, blob);
+            setTimeout(() => {      // safety net: still "loading" after 15 s -> use the YouTube player
+                if (token === playToken && state.engine === 'audio' && state.loading && !audio.currentTime && !track._ytFallback) {
+                    track._ytFallback = true; stopEngines(); startYT(track, token, true);
+                }
+            }, 15000);
         } catch (err) {
             clearTimeout(timer);
             if (err && err.message === 'cancelled') return;
@@ -2241,6 +2334,10 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.miniArtist.textContent = t.artist;
         elements.playerTitle.textContent = cleanTitle(t.title);
         elements.playerArtist.innerHTML = escapeHtml(t.artist) + viewsHTML(t.views);
+        const full = noEmoji(t.title || '').trim();
+        $('player-fulltitle').textContent = full;
+        $('player-meta').textContent = [t.artist, t.duration ? 'Length ' + t.duration : ''].filter(Boolean).join('  \u2022  ');
+        $('track-more').classList.toggle('hidden', !full);
         elements.miniPlayer.classList.remove('hidden');
         updatePlayerArt(t);
         updateWishlistBtnState(isLiked(t.id));
@@ -2886,6 +2983,14 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.shuffleBtn.addEventListener('click', () => setShuffle(!state.shuffle));
     elements.repeatBtn.addEventListener('click', cycleRepeat);
 
+    // song title: shows 2 lines, the arrow opens the full title + details (and collapses it again)
+    $('title-toggle').addEventListener('click', () => {
+        const info = document.querySelector('.track-info');
+        const open = info.classList.toggle('expanded');
+        $('title-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+        $('title-toggle').querySelector('span').textContent = open ? 'keyboard_arrow_up' : 'keyboard_arrow_down';
+    });
+    elements.playerTitle.addEventListener('click', () => $('title-toggle').click());
     elements.openFullPlayerBtn.addEventListener('click', () => elements.fullPlayerOverlay.classList.remove('hidden'));
     elements.closePlayerBtn.addEventListener('click', () => elements.fullPlayerOverlay.classList.add('hidden'));
     $('player-dl-btn').addEventListener('click', () => downloadSong(state.currentTrack));
