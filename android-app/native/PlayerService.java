@@ -66,7 +66,11 @@ public class PlayerService extends MediaSessionService {
                 if (state == Player.STATE_ENDED) NativePlayer.onEnded();
             }
             @Override public void onIsPlayingChanged(boolean playing) { NativePlayer.snapshot(exo); }
-            @Override public void onPlayerError(PlaybackException error) { NativePlayer.onError(error.getErrorCodeName()); }
+            @Override public void onPlayerError(PlaybackException error) {
+                String why = "";
+                try { Throwable c = error.getCause(); String m = c != null ? c.getMessage() : error.getMessage(); if (m != null) why = ": " + (m.length() > 60 ? m.substring(0, 60) : m); } catch (Exception e) { }
+                NativePlayer.onError(error.getErrorCodeName() + why);
+            }
         });
         instance = this;
         NativePlayer.startTicker();

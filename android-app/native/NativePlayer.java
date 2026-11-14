@@ -85,7 +85,7 @@ final class NativePlayer {
                     new File(new File(s.getCacheDir(), "yt"), m.id + ".m4a").delete();
                     src = Uri.fromFile(YtAudio.ensureFile(s, m.id, () -> token != my));
                 } else {
-                    src = sourceFor(s, m);
+                    src = longAudio ? sourceFor(s, m) : localOrStream(s, m, () -> token != my);
                 }
                 m.src = src;
                 final Uri fsrc = src;
@@ -109,6 +109,21 @@ final class NativePlayer {
         File cf = new File(new File(c.getCacheDir(), "yt"), m.id + ".m4a");
         if (cf.exists() && AudioFetch.valid(cf)) { cf.setLastModified(System.currentTimeMillis()); return Uri.fromFile(cf); }
         return YtStream.uriFor(m.id);
+    }
+
+    /** Normal songs (under 15 min) are downloaded completely and CHECKED first, then played from that file:
+     *  a file never ends early, never goes silent after a jump, and jumping is instant.
+     *  Long audio (podcasts) is streamed. If the download does not work, streaming is the fallback. */
+    private static Uri localOrStream(Context c, Meta m, java.util.function.BooleanSupplier cancelled) {
+        Uri src = sourceFor(c, m);
+        if (!YtStream.SCHEME.equals(src.getScheme())) return src;           // already a file / a song you downloaded
+        try {
+            YtStream.Link l = YtStream.find(m.id, false);
+            if (l.lenSec > 0 && l.lenSec <= YtStream.LONG_SECONDS) {
+                return Uri.fromFile(YtAudio.ensureFile(c, m.id, cancelled));
+            }
+        } catch (Exception e) { /* could not get a complete file: stream it instead */ }
+        return src;
     }
 
     private static MediaItem item(Uri src, Meta m) {
@@ -147,12 +162,13 @@ final class NativePlayer {
             try {
                 if (!ensureService(ctx)) { cb.done(false, "player service did not start"); return; }
                 if (token != my) { cb.done(false, "cancelled"); return; }
-                final Uri src = sourceFor(ctx, m);
+                cb.done(true, null);                       // answer now: the download below may take a few seconds
+                final Uri src = localOrStream(ctx, m, () -> token != my);
+                if (token != my) return;
                 m.src = src;
                 main.post(() -> { if (token == my) startItem(src, m); });
-                cb.done(true, null);                       // playback starts by itself as soon as the first bit of audio arrives
             } catch (Exception e) {
-                cb.done(false, String.valueOf(e.getMessage()));
+                if (token == my) main.post(() -> giveUp());
             }
         });
     }
@@ -161,7 +177,14 @@ final class NativePlayer {
         next = m;
         m.src = sourceFor(ctx, m);
         pool.execute(() -> {
-            try { if (YtStream.SCHEME.equals(m.src.getScheme())) YtStream.find(m.id, false); } catch (Exception e) { }   // link ready = next song starts at once
+            try {
+                if (!YtStream.SCHEME.equals(m.src.getScheme())) return;
+                YtStream.Link l = YtStream.find(m.id, false);                // link ready = next song starts at once
+                if (l.lenSec > 0 && l.lenSec <= YtStream.LONG_SECONDS) {
+                    Uri f = Uri.fromFile(YtAudio.ensureFile(ctx, m.id, () -> next != m));   // the whole next song, checked
+                    if (next == m) m.src = f;
+                }
+            } catch (Exception e) { }
         });
     }
 

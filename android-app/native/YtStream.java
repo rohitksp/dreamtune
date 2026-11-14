@@ -225,7 +225,11 @@ final class YtStream {
             IOException last = null;
             for (int attempt = 0; attempt < 3; attempt++) {
                 Link l;
-                try { l = find(id, attempt > 0); }
+                try {
+                    if (attempt >= 2) {                                   // the quick link keeps being refused: try the other kind of link
+                        try { l = findAlt(id); } catch (Exception x) { l = find(id, true); }
+                    } else l = find(id, attempt > 0);
+                }
                 catch (Exception e) { throw new IOException("audio link: " + e.getMessage(), e); }
                 long tot = total >= 0 ? total : l.total;
                 if (tot >= 0 && from >= tot) { eof = true; return; }
